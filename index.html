@@ -148,13 +148,14 @@ input[type=text],input[type=number],select{background:var(--bg2);color:var(--tex
     <div class="muted">小=3枚判定/+3chip | 中=4枚判定/+5chip | 大=5枚判定/+10chip | ニアピン半額</div>
   </div>
   <div class="panel" style="background:var(--bg2)">
-    <h3>📖 ルール概要 (v2)</h3>
+    <h3>📖 ルール概要 (v3 - 観戦モード対応版)</h3>
     <div style="font-size:13px;line-height:1.6">
       • 怪盗となり、金庫に1～5の数字カードを伏せて置く<br>
       • <b>目標値で💎成功</b>、<b>-1で🎯ニアピン</b>、<b>超過で💥バースト</b>、<b>-2以下で❌失敗</b><br>
       • 🔭スカウト1回 (覗き見 → 同ターン配置可) / 🎯プレビュー1回 (成功独占 / バースト-5)<br>
       • 💥バースト時は<span class="err">最大数値の犯人が強調演出</span>される<br>
-      • ゲーム終了時、バースト最多者は任意で<b>🏆伝説のドジ泥棒</b>（全員チップ平均化）発動可能
+      • ゲーム終了時、バースト最多者は任意で<b>🏆伝説のドジ泥棒</b>（全員チップ平均化）発動可能<br>
+      • <b>👁️観戦モード</b>: 5人目以降 / 満員時 / ゲーム進行中の入室は自動で観戦者になります
     </div>
   </div>
 </div>
@@ -268,11 +269,10 @@ input[type=text],input[type=number],select{background:var(--bg2);color:var(--tex
 <!-- 演出オーバーレイ -->
 <div id="overlay" class="overlay hidden"></div>
 
-<!-- Firebase -->
+<!-- Firebase (v3: 匿名認証なし / 身内プレイ用・観戦モード対応) -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, set, get, onValue, update, runTransaction, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // ======== 設定 (各自の Firebase プロジェクト情報に書き換え) ========
 const firebaseConfig = {
@@ -287,13 +287,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const auth = getAuth(app);
-window.__fb = { db, ref, set, get, onValue, update, runTransaction, auth, signInAnonymously, onAuthStateChanged, onDisconnect };
+window.__fb = { db, ref, set, get, onValue, update, runTransaction, onDisconnect };
 
-signInAnonymously(auth).catch(e=>console.error('auth err',e));
-onAuthStateChanged(auth, u=>{
-  if(u){ window.__uid = u.uid; document.dispatchEvent(new CustomEvent('fbReady')); }
-});
+// 匿名認証を撤廃。Realtime Database だけ使用（身内プレイ想定）
+// Firebaseルールは公開 ({".read":true,".write":true}) を前提
+document.dispatchEvent(new CustomEvent('fbReady'));
 </script>
 
 <script>
@@ -319,6 +317,7 @@ const S = {
   name: '',
   roomId: '',
   seat: '',
+  isSpectator: false,   // 👁️観戦モードフラグ
   room: null,
   selCard: -1,
   selSafe: -1,
@@ -797,8 +796,10 @@ async function joinRoom(){
   const r = await window.__fb.get(roomRef(rid));
   if(!r.exists()){ toast('部屋なし'); return; }
   let mySeat = '';
+  let asSpectator = false;
   await window.__fb.runTransaction(roomRef(rid), (room)=>{
     if(!room) return room;
+    // 既存プレイヤー: 再入場
     for(const s in (room.players||{})){
       if(room.players[s].token===S.token){
         mySeat = s;
@@ -806,9 +807,27 @@ async function joinRoom(){
         return room;
       }
     }
-    if(room.status==='playing'){ return; }
-    const used = new Set(Object.keys(room.players||{}));
+    // 既存観戦者: 再入場
+    if(room.spectators && room.spectators[S.token]){
+      mySeat = 'SPEC';
+      asSpectator = true;
+      room.spectators[S.token].name = name;
+      room.spectators[S.token].lastSeen = Date.now();
+      return room;
+    }
     const cfg = room.cfg || {maxP:4};
+    const used = new Set(Object.keys(room.players||{}));
+    // プレイ中 or 満員 or 最大人数超過 → 観戦者として参加
+    const isFull = used.size >= cfg.maxP;
+    const isPlaying = room.status==='playing' || room.status==='ended';
+    if(isFull || isPlaying){
+      room.spectators = room.spectators||{};
+      room.spectators[S.token] = { token:S.token, name:name, joinedAt:Date.now(), lastSeen:Date.now() };
+      mySeat = 'SPEC';
+      asSpectator = true;
+      return room;
+    }
+    // 空席あり・待機中 → プレイヤー参加
     for(let i=1;i<=cfg.maxP;i++){
       const s = 'P'+i;
       if(!used.has(s)){
@@ -820,13 +839,20 @@ async function joinRoom(){
         return room;
       }
     }
+    // フォールバック: 観戦者
+    room.spectators = room.spectators||{};
+    room.spectators[S.token] = { token:S.token, name:name, joinedAt:Date.now(), lastSeen:Date.now() };
+    mySeat = 'SPEC';
+    asSpectator = true;
+    return room;
   });
-  if(!mySeat){ toast('入室失敗 (満員または進行中)'); return; }
+  if(!mySeat){ toast('入室失敗'); return; }
   S.roomId = rid;
   S.seat = mySeat;
+  S.isSpectator = asSpectator;
   localStorage.setItem('mc_lastRoom', rid);
   subscribeRoom();
-  toast('入室 '+rid+' ('+mySeat+')');
+  toast(asSpectator ? '👁️観戦モードで入室 '+rid : '入室 '+rid+' ('+mySeat+')');
 }
 
 async function tryRejoin(){
@@ -837,16 +863,22 @@ async function tryRejoin(){
     if(!r.exists()){ localStorage.removeItem('mc_lastRoom'); return; }
     const room = r.val();
     let mySeat = '';
+    let asSpec = false;
     for(const s in (room.players||{})){
       if(room.players[s].token===S.token){ mySeat=s; break; }
+    }
+    if(!mySeat && room.spectators && room.spectators[S.token]){
+      mySeat = 'SPEC';
+      asSpec = true;
     }
     if(mySeat){
       S.roomId = rid;
       S.seat = mySeat;
-      S.name = room.players[mySeat].name;
+      S.isSpectator = asSpec;
+      S.name = asSpec ? room.spectators[S.token].name : room.players[mySeat].name;
       document.getElementById('pname').value = S.name;
       subscribeRoom();
-      toast('再入場 '+rid);
+      toast(asSpec ? '👁️観戦で再入場 '+rid : '再入場 '+rid);
     }
   }catch(e){console.warn(e)}
 }
@@ -878,7 +910,9 @@ async function leaveRoom(){
   if(S.roomId){
     await window.__fb.runTransaction(roomRef(S.roomId), (room)=>{
       if(!room) return room;
-      if(room.status==='waiting' && room.players && room.players[S.seat]){
+      if(S.isSpectator){
+        if(room.spectators) delete room.spectators[S.token];
+      } else if(room.status==='waiting' && room.players && room.players[S.seat]){
         delete room.players[S.seat];
         room.order = (room.order||[]).filter(s=>s!==S.seat);
       }
@@ -886,7 +920,7 @@ async function leaveRoom(){
     });
   }
   if(unsub) unsub();
-  S.roomId = ''; S.seat = ''; S.room = null;
+  S.roomId = ''; S.seat = ''; S.room = null; S.isSpectator = false;
   localStorage.removeItem('mc_lastRoom');
   document.getElementById('lobby').classList.remove('hidden');
   document.getElementById('game').classList.add('hidden');
@@ -951,20 +985,34 @@ function renderPlayers(r, st){
   el.innerHTML = '';
   r.order.forEach((s, i)=>{
     const p = r.players[s];
-    const isMe = s===S.seat;
+    const isMe = s===S.seat && !S.isSpectator;
     const isTurn = st && st.turnSeat===s && !st.ended;
     const gp = st ? st.players[s] : null;
     const div = document.createElement('div');
     div.className = 'player-card ' + COLORS[i] + (isMe?' me':'') + (isTurn?' turn':'');
     div.id = 'player_'+s;
     div.innerHTML = `
-      <div class="name"><span class="badge ${COLORS[i]}">${EMOJI[i]} ${s}</span> ${p.name}${isMe?' (あなた)':''}</div>
+      <div class="name"><span class="badge ${COLORS[i]}">${EMOJI[i]} ${s}</span> ${escapeHtml(p.name)}${isMe?' (あなた)':''}</div>
       ${gp? `<div class="chips">💰 ${gp.chips}</div>
              <div class="icons">🃏${gp.hand.length} 🔭${gp.scoutLeft} 🎯${gp.previewLeft} 💥${gp.bursts}</div>`
            : '<div class="muted">待機中</div>'}
     `;
     el.appendChild(div);
   });
+  // 👁️ 観戦者一覧
+  const specs = r.spectators ? Object.values(r.spectators) : [];
+  if(specs.length > 0){
+    const specDiv = document.createElement('div');
+    specDiv.className = 'player-card';
+    specDiv.style.borderLeft = '6px solid #888';
+    specDiv.style.minWidth = '160px';
+    const names = specs.map(x=>escapeHtml(x.name) + (x.token===S.token?' (あなた)':'')).join(', ');
+    specDiv.innerHTML = `
+      <div class="name"><span class="badge" style="background:#555;color:#fff">👁️ 観戦</span> ${specs.length}人</div>
+      <div class="muted" style="font-size:11px;margin-top:4px;word-break:break-all">${names}</div>
+    `;
+    el.appendChild(specDiv);
+  }
 }
 
 function renderSafes(r, st){
@@ -991,6 +1039,7 @@ function renderSafes(r, st){
       <div class="slots" id="slots_${idx}"></div>
     `;
     div.onclick = (e)=>{
+      if(S.isSpectator) return;  // 観戦者は操作不可
       if(S.scoutMode) return;
       if(S.selCard>=0){
         doPlace(S.selCard, idx, S.preview);
@@ -1043,6 +1092,10 @@ function renderHand(r, st){
   const el = document.getElementById('hand');
   el.innerHTML = '';
   if(!st){ el.innerHTML='<div class="muted">ゲーム未開始</div>'; return; }
+  if(S.isSpectator){
+    el.innerHTML = '<div class="muted">👁️ 観戦モード - 手札は参加プレイヤーのみ見えます</div>';
+    return;
+  }
   const p = st.players[S.seat];
   if(!p){ el.innerHTML='<div class="muted">観戦中</div>'; return; }
   p.hand.forEach((c, i)=>{
@@ -1066,18 +1119,19 @@ function renderHand(r, st){
 
 function renderStatus(r, st){
   const el = document.getElementById('statusMsg');
+  const specTag = S.isSpectator ? '<span class="badge" style="background:#555;color:#fff">👁️観戦モード</span> ' : '';
   if(!st){
-    el.innerHTML = `⏳ 待機中 ${r.order.length}/${r.cfg.maxP}人`;
+    el.innerHTML = specTag + `⏳ 待機中 ${r.order.length}/${r.cfg.maxP}人`;
     return;
   }
   if(st.ended){
-    el.innerHTML = st.phase==='clumsy_check' ? '🏁 終了 - ドジ泥棒発動確認中...' : `🏁 ${st.summary}`;
+    el.innerHTML = specTag + (st.phase==='clumsy_check' ? '🏁 終了 - ドジ泥棒発動確認中...' : `🏁 ${escapeHtml(st.summary||'')}`);
     return;
   }
   const turnP = r.players[st.turnSeat];
   const turnIdx = r.order.indexOf(st.turnSeat);
-  const isMe = st.turnSeat===S.seat;
-  el.innerHTML = `<span class="badge ${COLORS[turnIdx]}">${EMOJI[turnIdx]} ${st.turnSeat}</span> ${turnP?.name}${isMe?'<b class="suc"> (あなたの番)</b>':''}
+  const isMe = st.turnSeat===S.seat && !S.isSpectator;
+  el.innerHTML = specTag + `<span class="badge ${COLORS[turnIdx]}">${EMOJI[turnIdx]} ${st.turnSeat}</span> ${escapeHtml(turnP?.name||'')}${isMe?'<b class="suc"> (あなたの番)</b>':''}
     | 山札${st.deck.length} 捨札${st.discard.length} 金庫山${st.safeDeck.length}`;
   document.getElementById('deckCnt').textContent = st.deck.length;
   document.getElementById('safeCnt').textContent = st.safeDeck.length;
@@ -1088,6 +1142,12 @@ function renderActPanel(r, st){
   const btns = document.getElementById('actBtns');
   info.innerHTML = '';
   btns.innerHTML = '';
+
+  // 👁️観戦モード: 操作UIを一切出さない
+  if(S.isSpectator){
+    info.innerHTML = '👁️ <b>観戦モード</b> - あなたはこのゲームに参加していません。受け手として楽しんでください。';
+    return;
+  }
 
   if(!st){
     const isHost = r.order[0]===S.seat;
@@ -1211,7 +1271,7 @@ function renderEnd(r, st){
   pan.classList.remove('hidden');
 
   if(st.phase==='clumsy_check' && !st.clumsyApplied){
-    const hasRight = st.clumsyCandidates.includes(S.seat);
+    const hasRight = !S.isSpectator && st.clumsyCandidates.includes(S.seat);
     const notAsked = !st.clumsyAsked.includes(S.seat);
     res.innerHTML = `<div class="muted">最終結果確定前: 伝説のドジ泥棒 発動権確認中...</div>
       <div>発動権者: ${st.clumsyCandidates.map(s=>st.players[s].name).join(', ')}</div>`;
