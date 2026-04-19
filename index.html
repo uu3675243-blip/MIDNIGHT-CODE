@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<title>🌙 MIDNIGHT CODE - 金庫解読 v4</title>
+<title>🌙 MIDNIGHT CODE - 金庫解読</title>
 <style>
 :root{
   --bg:#0b1020; --bg2:#141a30; --panel:#1a2240; --border:#2a3560;
@@ -117,7 +117,7 @@ label{color:var(--muted);font-size:13px}
 
 <!-- ===== ロビー画面 ===== -->
 <div id="lobby" class="panel">
-  <h1>🌙 MIDNIGHT CODE 🔐 <small style="font-size:13px;color:var(--muted)">v4 - デュアルモード対応</small></h1>
+  <h1>🌙 MIDNIGHT CODE 🔐</h1>
   <div class="muted">ブラフ＆カウンティング心理ボードゲーム - 金庫の暗証番号を解読せよ</div>
   <div class="panel" style="background:var(--bg2)">
     <div class="row"><label>プレイヤー名: </label><input id="pname" type="text" maxlength="12" value="Player"></div>
@@ -126,6 +126,8 @@ label{color:var(--muted);font-size:13px}
     <button class="primary" onclick="createRoom()">🆕 部屋を作る</button>
     <input id="roomid" type="text" placeholder="ROOM ID" maxlength="6" style="text-transform:uppercase">
     <button onclick="joinRoom()">🚪 入室</button>
+    <button onclick="toggleSound()" title="効果音のON/OFF" id="soundBtn">🔊 SE</button>
+    <button onclick="hardReset()" title="ローカル保存データ（プレイヤーID・前回部屋）を全消去" style="margin-left:auto">🧹 初期化</button>
   </div>
   <div class="panel" style="background:var(--bg2)">
     <div class="row">
@@ -145,14 +147,26 @@ label{color:var(--muted);font-size:13px}
     <div class="muted">小=3枚判定 / 中=4枚判定 / 大=5枚判定 (デュエルは初期ゴースト1枚込み)</div>
   </div>
   <div class="panel" style="background:var(--bg2)">
-    <h3>📖 ルール概要 (v4)</h3>
-    <div style="font-size:13px;line-height:1.6">
-      🎯 <b>2名（デュエル）</b>: ゴーストカード & ノイズ配置で相手を爆発へ誘導、コード・スワップで逆転<br>
-      🎉 <b>3-4名（パーティ）</b>: 混沌の中で責任のなすりつけ合い、バースト3回で「伝説のドジ怪盗」発動<br>
-      • 目標値=<b class="suc">💎成功</b> / 目標値-1=<b class="warn">🎯ニアピン</b> / 超過=<b class="err">💥バースト</b> / -2以下=<b>❌不足</b><br>
-      • 🔭<b>スカウト</b>1回 (他プレイヤー or ゴーストカード、ジャスト時復活) / 🎯<b>予告状</b>1回 (金庫1枚先着制)<br>
-      • 💥バースト: <b>最後に置いた人=犯人</b> (-2〜-3)、他はおこぼれで自分の合計値分を獲得<br>
-      • 👁️<b>観戦モード</b>: 5人目以降 / 満員時 / ゲーム進行中の入室は自動で観戦者になる
+    <h3>📖 ゲーム概要と遊び方</h3>
+    <div style="font-size:13px;line-height:1.7">
+      <p><b>🎮 どんなゲーム？</b><br>
+      あなたは「怪盗」となり、仲間と一緒に金庫を解錠するミッションに挑みます。<br>
+      各金庫には「暗証番号（目標値）」が設定されており、プレイヤーは手札から数字カードを<b>伏せて配置</b>します。規定枚数に達すると金庫が開示され、合計値が目標と一致すれば💎<b>解錠成功</b>！超えたら💥<b>爆発</b>！ 足りなければ❌<b>不足</b>で失敗。<br>
+      相手の思考を読み、ブラフを仕掛け、時にはなすりつけ合いながら、最多チップを目指します。</p>
+
+      <p><b>🕹️ 操作方法</b></p>
+      <ol style="padding-left:18px;margin:4px 0">
+        <li>ロビーで「🆕部屋を作る」か「🚪入室」（ROOM ID入力）</li>
+        <li>ゲーム画面で<b>手札から1枚タップ</b>して選択</li>
+        <li>次に<b>配置したい金庫をタップ</b>して伏せる（「✅配置ボタン」でも確定可）</li>
+        <li>🎯<b>予告状</b>ONで配置 = 成功時に報酬独占/失敗時-5chip（1金庫1人まで先着）</li>
+        <li>🔭<b>スカウトボタン</b>→ 場の伏せカードをタップで2.5秒覗き見（1ゲーム1回、ジャスト成功で復活）</li>
+        <li>🏃<b>パス</b>で手札を出さずに終了（手札0枚時など）</li>
+      </ol>
+
+      <p><b>🎉 3〜4人 パーティモード</b>: 混沌の中で責任のなすりつけ合い！ バースト累積<b>3回</b>で「🏆伝説のドジ怪盗」発動権（全員のチップを平均化する逆転の一手）</p>
+      <p><b>🎯 2人 デュエルモード</b>: 初期👻ゴーストカード+毎ターン🎲ノイズ配置で不確定要素を演出。相手に<b>5点以上</b>差をつけられたら💱<b>コード・スワップ</b>で丸ごと入れ替え可能</p>
+      <p><b>👁️ 観戦モード</b>: 5人目以降 / 満員 / ゲーム進行中の入室は自動で観戦者になります（上限20名）</p>
     </div>
   </div>
 </div>
@@ -204,7 +218,17 @@ label{color:var(--muted);font-size:13px}
     </div>
     <div id="logPane"><div id="logs" class="log"></div></div>
     <div id="rulePane" class="hidden" style="font-size:13px;line-height:1.7">
-      <h3>📖 MIDNIGHT CODE v4 ルール</h3>
+      <h3>📖 MIDNIGHT CODE 完全ルール</h3>
+      <h4>🎮 ゲームの目的</h4>
+      ブラフ＆カウンティング心理戦ボードゲーム。<b>怪盗</b>となって仲間と金庫を解錠し、最多チップを目指します。手札を<b>伏せて配置</b>するため、誰が何を置いたかが隠される点が要。
+      <h4>🕹️ 操作フロー</h4>
+      <ol>
+        <li>手札から1枚タップ（選択）</li>
+        <li>配置先の金庫をタップ（または「✅配置」ボタン）</li>
+        <li>必要なら🎯予告状ON、🔭スカウト、🏃パスを併用</li>
+        <li>金庫規定枚数到達 → 自動開示・判定</li>
+        <li>判定結果に応じチップ増減、金庫補充、次ターンへ</li>
+      </ol>
       <h4>🎯 勝利条件</h4>
       ゲーム終了時、所持チップが最多のプレイヤーが勝利。
       <h4>🧮 判定結果</h4>
@@ -232,7 +256,13 @@ label{color:var(--muted);font-size:13px}
         <li>ゴースト/ノイズカードでのバースト → <b>置いたプレイヤーが犯人</b></li>
         <li>🔭スカウト: 相手のカード or ゴースト/ノイズ を覗ける</li>
         <li>🎯予告状: 相手が先に宣言した金庫には宣言不可</li>
-        <li>💱<b>コード・スワップ</b>: 「1手番で2金庫同時爆発」or「相手に5点以上差をつけられる」場合、最終スコアを相手と入れ替え可能</li>
+        <li>💰<b>ノイズ配置パス</b>: 山札ありでも「1チップ支払い」でパス可能（心理戦の緊張維持）</li>
+        <li>💱<b>コード・スワップ</b>: 相手に5点以上差をつけられた場合、最終スコアを丸ごと入れ替え可能</li>
+      </ul>
+      <h4>💥 特殊イベント</h4>
+      <ul>
+        <li><b>2金庫同時爆発</b>: 同一手番内で2つ以上の金庫を同時爆発させた場合、犯人にペナルティ相殺ボーナス（+3chip&スカウト復活）</li>
+        <li><b>奇跡の解錠（全ゴースト成功）</b>: 金庫内カードが全てゴースト/ノイズで解錠成功 → 最後に置いたプレイヤーが報酬+1ボーナスchipを獲得し、手札調整権（1ドロー&1ディスカード）を取得</li>
       </ul>
       <h4>🏁 終了条件</h4>
       金庫山が尽きかつ場の金庫も全て解決 → ゲーム終了。
@@ -282,15 +312,19 @@ try{
 
 <script>
 /* ============================================================================
- * MIDNIGHT CODE v4 - Dual Mode (Party / Duel) + Bug Fixes
+ * MIDNIGHT CODE - Dual Mode (Party / Duel)
  * ============================================================================
  */
 
 const HAND_SIZE = 3;
 const SAFE_SLOTS = 3;
 const LOG_MAX = 200;
-const BURST_TO_TRIGGER_CLUMSY = 3;  // v4: バースト3回でドジ怪盗発動権
+const BURST_TO_TRIGGER_CLUMSY = 3;  // パーティ: バースト3回でドジ怪盗発動権
 const CODE_SWAP_DIFF = 5;            // デュエル: 5点差でコード・スワップ発動権
+const MAX_SPECTATORS = 20;           // Q11: 観戦者上限
+const MULTI_BURST_BONUS = 3;         // Q1/Q2: 2金庫同時爆発時の犯人补償
+const ALL_GHOST_BONUS = 1;           // Q3: 奇跡の解錠（全ゴースト成功）ボーナス
+const NOISE_PASS_COST = 1;           // Q7: ノイズ配置パスのチップ代償
 
 const SAFE_META = {
   S: { label:'小', count:3, reward:3, burst:-2 },
@@ -570,6 +604,16 @@ function judgeSafe(st, safeIdx, room){
         log_(st, `🔭✨ ${st.players[lastRealPlacer].name} のスカウトチップ復活！ (ジャスト特典)`, { kind:'success' });
       }
     }
+
+    // ★Q3: 奇跡の解錠 - 金庫内カードがすべてゴースト/ノイズで成功
+    const allGhostOrNoise = sf.cards.every(c => c.isGhost || c.isNoise || c.owner === GHOST_OWNER);
+    if(allGhostOrNoise && lastAnyPlacer && lastAnyPlacer !== GHOST_OWNER && st.players[lastAnyPlacer]){
+      const lp = st.players[lastAnyPlacer];
+      lp.chips += ALL_GHOST_BONUS;
+      lp.handAdjustRight = (lp.handAdjustRight || 0) + 1;
+      pushEvent(st, { type:'all_ghost', by:lastAnyPlacer, byName:lp.name });
+      log_(st, `🌟👻 Q3 奇跡の解錠発動！ 全ゴースト/ノイズで成功 → ${lp.name} に +${ALL_GHOST_BONUS}chip & 手札調整権 (次ターン1ドロー+1ディスカード)`, { kind:'success' });
+    }
   } else if(result === 'NEAR'){
     pushEvent(st, { type:'near', safeKind:sf.kind, sum, target });
     const reward = Math.floor(meta.reward / 2);
@@ -604,6 +648,10 @@ function judgeSafe(st, safeIdx, room){
     log_(st, `💥💥💥 バースト発生！ 合計${sum} > 目標${target}`, { kind:'burst' });
     log_(st, `⚠️ 犯人: ${culpritName} (最後に${culpritValue}を投入) ⚠️`, { kind:'burst' });
     st.turnBursts = (st.turnBursts || 0) + 1;
+    // ★Q1/Q2: 1ターン内に 2+ バーストで特典判定（犯人がプレイヤーの場合）
+    if(!isGhostCulprit && st.turnBursts >= 2){
+      checkMultiBurstBonus(st, culprit);
+    }
 
     // 犯人ペナルティ
     if(!isGhostCulprit && st.players[culprit]){
@@ -640,6 +688,20 @@ function judgeSafe(st, safeIdx, room){
   }
   st.safes[safeIdx] = null;
   log_(st, `━━━━━━━━━━━━━━━━━━━━━━`);
+}
+
+/* ==== Q1/Q2: 同時バースト（1ターン内に2金庫以上バースト）特典判定 ==== */
+function checkMultiBurstBonus(st, seat){
+  // 1ターン中に発生したバースト数が2回以上なら特典
+  if((st.turnBursts || 0) < 2) return;
+  if(!st.players[seat]) return;
+  // 特典: 犯人に +3chip 補償（最新バースト1回分ペナルティを相殺+α）
+  st.players[seat].chips += MULTI_BURST_BONUS;
+  st.players[seat].multiBurstBonus = (st.players[seat].multiBurstBonus || 0) + 1;
+  pushEvent(st, { type:'multiburst', by:seat, byName:st.players[seat].name, bursts:st.turnBursts });
+  log_(st, `🌟💥 Q1/Q2 同時バースト特典発動！ ${st.players[seat].name} は1ターン中に${st.turnBursts}回バースト → +${MULTI_BURST_BONUS}chip補償 & 次ターン『コード・スワップ権』を獲得 (ドジ怪盗即時発動権)`, { kind:'success' });
+  // 次ターン 2カード入れ替え権を付与
+  st.players[seat].codeSwapPendingUntil = (st.turnSerial || 0) + 2;
 }
 
 /* ==== 終了判定 ==== */
@@ -902,6 +964,39 @@ function processAction(room, seat, action){
     return;
   }
 
+  if(action.type === 'noise_pass'){
+    // Q7: デュエルのノイズ配置フェーズを 1chip 支払ってパス
+    assertTurn(st, seat);
+    if(st.mode !== 'duel') throw new Error('デュエルモード専用');
+    if(st.phase !== 'choose_noise') throw new Error('ノイズ配置フェーズではない');
+    const p = st.players[seat];
+    if(p.chips < NOISE_PASS_COST) throw new Error(`ノイズパスには ${NOISE_PASS_COST}chip 必要 (現在${p.chips})`);
+    p.chips -= NOISE_PASS_COST;
+    log_(st, `👻💨 ${p.name} が ${NOISE_PASS_COST}chip 支払ってノイズ配置をパス (Q7)`);
+    pushEvent(st, { type:'noise_pass', by:seat, byName:p.name });
+    drawToHand(st, seat);
+    advanceTurn(st, room);
+    if(checkGameEnd(st, room)) return;
+    return;
+  }
+
+  if(action.type === 'hand_adjust'){
+    // Q3特典の手札調整: 1ドロー+1ディスカード
+    if(!st) throw new Error('未開始');
+    const p = st.players[seat];
+    if(!p || (p.handAdjustRight||0) <= 0) throw new Error('手札調整権なし');
+    const discardIdx = action.discardIdx;
+    p.hand = arr(p.hand);
+    if(discardIdx < 0 || discardIdx >= p.hand.length) throw new Error('カード不正');
+    const discarded = p.hand.splice(discardIdx, 1)[0];
+    st.discard = arr(st.discard);
+    st.discard.push({ id:discarded.id, n:discarded.n });
+    drawToHand(st, seat);
+    p.handAdjustRight -= 1;
+    log_(st, `🎴 ${p.name} が手札調整を実施 (1枚捨てて1枚ドロー / Q3特典)`);
+    return;
+  }
+
   if(action.type === 'noise'){
     // デュエル専用: 山札から1枚引いて指定金庫に伏せる（見ずに）
     assertTurn(st, seat);
@@ -1061,6 +1156,12 @@ async function joinRoom(){
       const isFull = used.size >= cfg.maxP;
       const isPlaying = room.status === 'playing' || room.status === 'ended';
       if(isFull || isPlaying){
+        // Q11: 観戦者上限チェック（20名）
+        const specCount = Object.keys(room.spectators).length;
+        if(specCount >= MAX_SPECTATORS){
+          mySeat = 'FULL';
+          return room;
+        }
         room.spectators[S.token] = { token:S.token, name:name, joinedAt:Date.now(), lastSeen:Date.now() };
         mySeat = 'SPEC';
         asSpectator = true;
@@ -1075,11 +1176,18 @@ async function joinRoom(){
           return room;
         }
       }
+      // Q11: 観戦者上限チェック
+      const specCount = Object.keys(room.spectators).length;
+      if(specCount >= MAX_SPECTATORS){
+        mySeat = 'FULL';
+        return room;
+      }
       room.spectators[S.token] = { token:S.token, name:name, joinedAt:Date.now(), lastSeen:Date.now() };
       mySeat = 'SPEC';
       asSpectator = true;
       return room;
     });
+    if(mySeat === 'FULL'){ toast(`❌ 観戦者上限到達 (${MAX_SPECTATORS}名) - 入室不可`); return; }
     if(!mySeat){ toast('❌ 入室失敗'); return; }
     S.roomId = rid;
     S.seat = mySeat;
@@ -1223,6 +1331,11 @@ async function resetGame(){
 }
 async function doPlace(cardIdx, safeIdx, preview){ await sendAction({ type:'place', cardIdx, safeIdx, preview }); }
 async function doNoise(safeIdx){ await sendAction({ type:'noise', safeIdx }); }
+async function doNoisePass(){ 
+  if(!confirm(`ノイズ配置を ${NOISE_PASS_COST}chip で放棄しますか？ (Q7ルール)`)) return;
+  await sendAction({ type:'noise_pass' }); 
+}
+async function doHandAdjust(discardIdx){ await sendAction({ type:'hand_adjust', discardIdx }); }
 async function doScout(safeIdx, cardIdx){ await sendAction({ type:'scout', safeIdx, cardIdx }); }
 async function doPass(){ await sendAction({ type:'pass' }); }
 async function doClumsyFire(){ await sendAction({ type:'clumsy_fire' }); }
@@ -1524,6 +1637,29 @@ function renderActPanel(r, st){
       pb.className = 'primary';
       pb.onclick = doPass;
       btns.appendChild(pb);
+    } else {
+      // Q7: 1chip 支払ってノイズ配置をパス
+      const canAfford = (p.chips || 0) >= NOISE_PASS_COST;
+      const npb = document.createElement('button');
+      npb.textContent = `💨 ノイズパス (-${NOISE_PASS_COST}chip)`;
+      npb.disabled = !canAfford;
+      npb.title = `Q7: ${NOISE_PASS_COST}chip 支払ってノイズ配置を放棄`;
+      npb.onclick = doNoisePass;
+      btns.appendChild(npb);
+    }
+    // Q3: 手札調整権があれば表示
+    if((p.handAdjustRight||0) > 0){
+      const hab = document.createElement('button');
+      hab.className = 'primary';
+      hab.textContent = `🎴 手札調整 (Q3特典 残${p.handAdjustRight})`;
+      hab.onclick = () => {
+        const hand = arr(p.hand);
+        if(hand.length === 0){ toast('手札が空です'); return; }
+        const idxStr = prompt(`捨てる手札番号 (1-${hand.length}): ` + hand.map((c,i)=>`[${i+1}]${c.n}`).join(' '));
+        const idx = parseInt(idxStr,10)-1;
+        if(!isNaN(idx) && idx >= 0 && idx < hand.length) doHandAdjust(idx);
+      };
+      btns.appendChild(hab);
     }
     return;
   }
@@ -1718,17 +1854,105 @@ function renderEnd(r, st){
 }
 
 /* ============================================================================
+ * Q10: 効果音 (WebAudio API / 最小実装)
+ * ============================================================================ */
+let _audioCtx = null;
+let soundEnabled = localStorage.getItem('mc_sound') !== 'off';
+
+function ensureAudio(){
+  if(!_audioCtx){
+    try { _audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+    catch(e){ console.warn('AudioContext unavailable', e); }
+  }
+  if(_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume();
+  return _audioCtx;
+}
+
+function playSound(kind){
+  if(!soundEnabled) return;
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const now = ctx.currentTime;
+  if(kind === 'unlock'){
+    // 金庫解錠: メタリッククリック + チャイム
+    const osc1 = ctx.createOscillator(), g1 = ctx.createGain();
+    osc1.type='square'; osc1.frequency.setValueAtTime(1800, now); osc1.frequency.exponentialRampToValueAtTime(600, now+0.08);
+    g1.gain.setValueAtTime(0.15, now); g1.gain.exponentialRampToValueAtTime(0.001, now+0.1);
+    osc1.connect(g1).connect(ctx.destination); osc1.start(now); osc1.stop(now+0.12);
+    [880, 1320, 1760].forEach((f,i)=>{
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001, now+0.15+i*0.08); g.gain.exponentialRampToValueAtTime(0.2, now+0.16+i*0.08); g.gain.exponentialRampToValueAtTime(0.001, now+0.6+i*0.08);
+      o.connect(g).connect(ctx.destination); o.start(now+0.15+i*0.08); o.stop(now+0.65+i*0.08);
+    });
+  } else if(kind === 'burst'){
+    // ドカン! (爆発音) - ホワイトノイズ + 低域衝撃音
+    const bufSize = ctx.sampleRate * 0.7;
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++){ data[i] = (Math.random()*2-1) * Math.pow(1-i/bufSize, 2); }
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.4, now); g.gain.exponentialRampToValueAtTime(0.001, now+0.7);
+    const filt = ctx.createBiquadFilter(); filt.type='lowpass'; filt.frequency.value=800;
+    src.connect(filt).connect(g).connect(ctx.destination); src.start(now);
+    const osc = ctx.createOscillator(), og = ctx.createGain();
+    osc.type='sawtooth'; osc.frequency.setValueAtTime(120, now); osc.frequency.exponentialRampToValueAtTime(30, now+0.4);
+    og.gain.setValueAtTime(0.3, now); og.gain.exponentialRampToValueAtTime(0.001, now+0.45);
+    osc.connect(og).connect(ctx.destination); osc.start(now); osc.stop(now+0.5);
+  } else if(kind === 'warn'){
+    // シュパッ! (警告音)
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type='sawtooth'; osc.frequency.setValueAtTime(200, now); osc.frequency.exponentialRampToValueAtTime(1400, now+0.12);
+    g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now+0.15);
+    osc.connect(g).connect(ctx.destination); osc.start(now); osc.stop(now+0.18);
+  } else if(kind === 'near'){
+    // ニアピン (短い二連音)
+    [900, 700].forEach((f,i)=>{
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type='triangle'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, now+i*0.1); g.gain.exponentialRampToValueAtTime(0.15, now+i*0.1+0.01); g.gain.exponentialRampToValueAtTime(0.001, now+i*0.1+0.12);
+      o.connect(g).connect(ctx.destination); o.start(now+i*0.1); o.stop(now+i*0.1+0.14);
+    });
+  }
+}
+
+function toggleSound(){
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('mc_sound', soundEnabled ? 'on' : 'off');
+  const b = document.getElementById('soundBtn');
+  if(b) b.textContent = soundEnabled ? '🔊 SE' : '🔇 SE';
+  toast(soundEnabled ? '🔊 効果音 ON' : '🔇 効果音 OFF');
+  if(soundEnabled){ ensureAudio(); playSound('near'); }
+}
+
+function hardReset(){
+  if(!confirm('ローカル保存データ（プレイヤーID・直前部屋）を全消去します。よろしいですか？')) return;
+  try {
+    localStorage.removeItem('mc_token');
+    localStorage.removeItem('mc_last_room');
+    localStorage.removeItem('mc_last_seat');
+    localStorage.removeItem('mc_sound');
+    localStorage.removeItem('mc_name');
+  } catch(e){}
+  toast('🧹 初期化完了。再読込します...');
+  setTimeout(()=>location.reload(), 500);
+}
+
+/* ============================================================================
  * 演出
  * ============================================================================ */
 function showEvent(ev, room){
   if(ev.type === 'success'){
     const meta = SAFE_META[ev.safeKind];
     triggerCutin('💎✨', `${meta.label}金庫 成功！ +${meta.reward}chip${ev.previewBy?' 独占':''}`, 'success');
+    playSound('unlock');
   } else if(ev.type === 'near'){
     const meta = SAFE_META[ev.safeKind];
     triggerCutin('🎯', 'ニアピン！半額報酬', 'near');
+    playSound('near');
   } else if(ev.type === 'burst'){
-    triggerCutin('💥', '💥 バースト！ 犯人: ' + ev.culpritName + ' (' + ev.culpritValue + ')', 'culprit');
+    triggerCutin('💥', '💥 ドカン！バースト！ 犯人: ' + ev.culpritName + ' (' + ev.culpritValue + ')', 'culprit');
+    playSound('burst');
     if(ev.culprit){
       setTimeout(()=>{
         const el = document.getElementById('player_' + ev.culprit);
@@ -1740,10 +1964,21 @@ function showEvent(ev, room){
     }
   } else if(ev.type === 'fail'){
     triggerCutin('❌', '不足 - 金庫破棄', '');
+    playSound('warn');
   } else if(ev.type === 'clumsy'){
     triggerCutin('🏆💥', '伝説のドジ怪盗発動！ by ' + ev.byName + ' → 全員' + ev.avg + 'chip', 'culprit');
+    playSound('burst');
   } else if(ev.type === 'codeswap'){
     triggerCutin('💱✨', 'コード・スワップ発動！ by ' + ev.byName, 'success');
+    playSound('unlock');
+  } else if(ev.type === 'multiburst'){
+    triggerCutin('🌟💥', `Q1/Q2 同時バースト特典！ ${ev.byName} に補償${MULTI_BURST_BONUS}chip`, 'success');
+    playSound('warn');
+  } else if(ev.type === 'all_ghost'){
+    triggerCutin('🌟👻', `奇跡の解錠！ ${ev.byName} にボーナス`, 'success');
+    playSound('unlock');
+  } else if(ev.type === 'noise_pass'){
+    triggerCutin('💨', `${ev.byName} がノイズ配置をパス (-${NOISE_PASS_COST}chip)`, '');
   }
 }
 
@@ -1796,11 +2031,21 @@ window.doClumsyFire = doClumsyFire;
 window.doClumsySkip = doClumsySkip;
 window.doCodeSwapFire = doCodeSwapFire;
 window.doCodeSwapSkip = doCodeSwapSkip;
+window.doNoisePass = doNoisePass;
+window.doHandAdjust = doHandAdjust;
+window.toggleSound = toggleSound;
+window.hardReset = hardReset;
+
+// サウンドボタン初期化
+window.addEventListener('DOMContentLoaded', ()=>{
+  const b = document.getElementById('soundBtn');
+  if(b) b.textContent = soundEnabled ? '🔊 SE' : '🔇 SE';
+});
 
 // 内部テスト用エクスポート
-window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY };
+window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, MAX_SPECTATORS };
 
-console.log('[MC v4] Loaded. Waiting for Firebase...');
+console.log('[MC v5] Loaded. Waiting for Firebase...');
 </script>
 
 </body>
