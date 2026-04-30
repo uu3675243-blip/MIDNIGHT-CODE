@@ -51,13 +51,6 @@ label{color:var(--muted);font-size:13px}
 .player-card.culprit-flash{animation:culpritPulse .5s 8;border-color:var(--err) !important;background:linear-gradient(135deg,#4a1010,#1a0000) !important}
 @keyframes pulse{0%,100%{box-shadow:0 0 10px rgba(242,201,76,.3)}50%{box-shadow:0 0 20px rgba(242,201,76,.7)}}
 @keyframes culpritPulse{0%,100%{transform:scale(1);box-shadow:0 0 15px var(--err)}50%{transform:scale(1.05);box-shadow:0 0 30px var(--err)}}
-/* コードスワップスライド演出 */
-.swap-flash{animation:swapFlash 1.5s ease-in-out 1;box-shadow:0 0 25px var(--accent),0 0 40px gold !important;z-index:10}
-@keyframes swapFlash{0%{transform:translateX(-30px) scale(.8);opacity:.3}50%{transform:translateX(0) scale(1.15);opacity:1}100%{transform:translateX(0) scale(1);opacity:1}}
-.card.swap-sel{outline:3px solid var(--accent);outline-offset:2px;box-shadow:0 0 12px var(--accent)}
-.safe.roulette{border-color:#e84393 !important;background:linear-gradient(135deg,#3a0030,#2a0020) !important;animation:rouletteGlow 2s infinite}
-.safe.roulette::after{content:'🎰×2';position:absolute;top:-12px;right:-12px;background:#e84393;color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:bold;box-shadow:0 0 10px #e84393}
-@keyframes rouletteGlow{0%,100%{box-shadow:0 0 10px #e84393}50%{box-shadow:0 0 25px #e84393,0 0 40px #ff6b9d}}
 
 /* 金庫 */
 .safe{display:inline-block;background:var(--bg2);border:3px solid var(--border);border-radius:14px;padding:10px;margin:6px;min-width:170px;vertical-align:top;position:relative;cursor:pointer;transition:all .2s}
@@ -134,10 +127,6 @@ label{color:var(--muted);font-size:13px}
     <input id="roomid" type="text" placeholder="ROOM ID" maxlength="6" style="text-transform:uppercase">
     <button onclick="joinRoom()">🚪 入室</button>
     <button onclick="toggleSound()" title="効果音のON/OFF" id="soundBtn">🔊 SE</button>
-    <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px" title="効果音音量">
-      🔉<input type="range" id="volSlider" min="0" max="100" value="70" style="width:80px" oninput="setSoundVolume(this.value/100)">
-      <span id="volLabel" class="muted">70%</span>
-    </span>
     <button onclick="hardReset()" title="ローカル保存データ（プレイヤーID・前回部屋）を全消去" style="margin-left:auto">🧹 初期化</button>
   </div>
   <div class="panel" style="background:var(--bg2)">
@@ -272,10 +261,8 @@ label{color:var(--muted);font-size:13px}
       </ul>
       <h4>💥 特殊イベント</h4>
       <ul>
-        <li><b>2金庫同時爆発</b>: 同一手番内で2つ以上の金庫を同時爆発させた場合、犯人にペナルティ相殺ボーナス +3chip。さらに次ターン「💱コード・スワップ」（場のカード2枚を入れ替える権利）を獲得</li>
-        <li><b>奇跡の解錠（全ゴースト成功）</b>: 金庫内カードが全てゴースト/ノイズで解錠成功 → 最後に置いたプレイヤーが追加 +3chip ボーナスを獲得</li>
-        <li><b>ラスト・ルーレット</b>: パーティモード山札残り5枚以下で、ランダム金庫が「倍率ドン」となり成功報酬とバーストペナルティが2倍に（初回100%、以降30%）</li>
-        <li><b>サドンデス</b>: 山札枯渇後は金庫の補充・ゴースト供給を停止。残った金庫を全て解錠/爆発で決着</li>
+        <li><b>2金庫同時爆発</b>: 同一手番内で2つ以上の金庫を同時爆発させた場合、犯人にペナルティ相殺ボーナス（+3chip&スカウト復活）</li>
+        <li><b>奇跡の解錠（全ゴースト成功）</b>: 金庫内カードが全てゴースト/ノイズで解錠成功 → 最後に置いたプレイヤーが報酬+1ボーナスchipを獲得し、手札調整権（1ドロー&1ディスカード）を取得</li>
       </ul>
       <h4>🏁 終了条件</h4>
       金庫山が尽きかつ場の金庫も全て解決 → ゲーム終了。
@@ -334,14 +321,10 @@ const SAFE_SLOTS = 3;
 const LOG_MAX = 200;
 const BURST_TO_TRIGGER_CLUMSY = 3;  // パーティ: バースト3回でドジ怪盗発動権
 const CODE_SWAP_DIFF = 5;            // デュエル: 5点差でコード・スワップ発動権
-const MAX_SPECTATORS = 20;           // 観戦者上限
-const MULTI_BURST_BONUS = 3;         // 2金庫同時爆発時の犯人補償
-const ALL_GHOST_BONUS = 3;           // 奇跡の解錠（全ゴースト成功）ボーナス: +3chipのみ
-const NOISE_PASS_COST_FIRST = 1;     // ノイズパス1回目のチップ代償
-const NOISE_PASS_COST_REPEAT = 2;    // ノイズパス2回目以降のチップ代償
-const LAST_ROULETTE_DECK_THRESHOLD = 5;
-const LAST_ROULETTE_FIRST_PROB = 1.0;
-const LAST_ROULETTE_REPEAT_PROB = 0.3;
+const MAX_SPECTATORS = 20;           // Q11: 観戦者上限
+const MULTI_BURST_BONUS = 3;         // Q1/Q2: 2金庫同時爆発時の犯人补償
+const ALL_GHOST_BONUS = 1;           // Q3: 奇跡の解錠（全ゴースト成功）ボーナス
+const NOISE_PASS_COST = 1;           // Q7: ノイズ配置パスのチップ代償
 
 const SAFE_META = {
   S: { label:'小', count:3, reward:3, burst:-2 },
@@ -380,9 +363,7 @@ const S = {
   scoutMode: false,
   lastShownEvent: 0,
   peekingCard: null,        // {safeIdx, cardIdx}
-  pendingNoise: false,      // デュエルモード: ノイズ配置待ち
-  swapMode: false,          // コードスワップ選択モード
-  swapSel: []               // スワップしたいカード [{safeIdx, cardIdx}, ...]
+  pendingNoise: false       // デュエルモード: ノイズ配置待ち
 };
 localStorage.setItem('mc_token', S.token);
 
@@ -535,19 +516,10 @@ function drawToHand(st, seat){
   }
 }
 
-function refillSafes(st, room){
+function refillSafes(st){
   st.safes = arr(st.safes);
   st.safeDeck = arr(st.safeDeck);
   st.deck = arr(st.deck);
-  // サドンデス：山札枯渇後は金庫補充もゴースト追加も停止
-  if(st.deck.length === 0){
-    if(!st.suddenDeathAnnounced){
-      st.suddenDeathAnnounced = true;
-      pushEvent(st, { type:'sudden_death' });
-      log_(st, `⚡⚡⚡ 最終局面突入！ 山札枯渇につき金庫補充・ゴースト供給を停止 ⚡⚡⚡`, { kind:'burst' });
-    }
-    return;
-  }
   for(let i=0;i<st.safes.length;i++){
     if(!st.safes[i] && st.safeDeck.length > 0){
       const sf = st.safeDeck.pop();
@@ -564,65 +536,18 @@ function refillSafes(st, room){
   }
 }
 
-/* ==== ラスト・ルーレット（パーティモード専用）==== */
-function maybeApplyLastRoulette(st){
-  if(st.mode !== 'party') return;
-  const deckLen = arr(st.deck).length;
-  if(deckLen > LAST_ROULETTE_DECK_THRESHOLD) return;
-  if(st.lastRouletteDone){
-    // 2回目以降は30%
-    if(Math.random() >= LAST_ROULETTE_REPEAT_PROB) return;
-  } else {
-    // 初回は100%
-    if(Math.random() >= LAST_ROULETTE_FIRST_PROB) return;
-  }
-  // 候補金庫：カード未配置、かつ倍率未適用
-  const candidates = [];
-  arr(st.safes).forEach((s,i) => {
-    if(s && (!s.rouletteMult || s.rouletteMult === 1) && arr(s.cards).length === 0){
-      candidates.push(i);
-    }
-  });
-  if(candidates.length === 0){
-    // カードあり金庫でも適用を許可
-    arr(st.safes).forEach((s,i) => {
-      if(s && (!s.rouletteMult || s.rouletteMult === 1)) candidates.push(i);
-    });
-  }
-  if(candidates.length === 0) return;
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-  st.safes[chosen].rouletteMult = 2;
-  st.lastRouletteDone = true;
-  pushEvent(st, { type:'last_roulette', safeIdx:chosen });
-  log_(st, `🎰🔥 ラスト・ルーレット！ 金庫${chosen+1} が「倍率ドン」に選ばれた（報酬2倍/ペナルティ2倍）`, { kind:'success' });
-}
-
 /* ==== 判定 (v4: 最後に置いた人が犯人、おこぼれルール) ==== */
-/**
- * judgeSafe is called whenever a card is placed.
- * - If sum > target -> BURST (immediate)
- * - If sum == target -> SUCCESS (immediate, even if not full)
- * - If safe is FULL and sum == target-1 -> NEAR
- * - If safe is FULL and sum <= target-2 -> FAIL
- * - Otherwise (mid-placement, sum < target) -> no judgment yet (returns false)
- * Returns true if judgment occurred (safe should be cleared).
- */
 function judgeSafe(st, safeIdx, room){
   const sf = st.safes[safeIdx];
   const meta = SAFE_META[sf.kind];
   sf.cards = arr(sf.cards);
   const sum = sf.cards.reduce((a,c)=>a+c.n, 0);
   const target = sf.target;
-  const isFull = sf.cards.length >= meta.count;
   let result;
-  if(sum > target) result = 'BURST';
-  else if(sum === target) result = 'SUCCESS';
-  else if(isFull && sum === target-1) result = 'NEAR';
-  else if(isFull) result = 'FAIL';
-  else return false;  // まだ判定しない（中途、合計ー目標未満）
-
-  // ラスト・ルーレット金庫の倍率ボーナス
-  const mult = sf.rouletteMult || 1;
+  if(sum === target) result = 'SUCCESS';
+  else if(sum === target-1) result = 'NEAR';
+  else if(sum > target) result = 'BURST';
+  else result = 'FAIL';
 
   // 参加者（GHOST除く実プレイヤー）と合計値を集計
   const participants = {};
@@ -650,16 +575,14 @@ function judgeSafe(st, safeIdx, room){
   const lastAnyPlacer = lastCard ? lastCard.owner : '';
 
   if(result === 'SUCCESS'){
-    const reward = meta.reward * mult;
-    pushEvent(st, { type:'success', safeKind:sf.kind, sum, target, previewBy, prevName: previewBy ? st.players[previewBy]?.name : '', mult });
-    if(mult > 1) log_(st, `🎰 倍率ドン！報酬${mult}倍適用`, { kind:'success' });
+    pushEvent(st, { type:'success', safeKind:sf.kind, sum, target, previewBy, prevName: previewBy ? st.players[previewBy]?.name : '' });
     if(previewBy && st.players[previewBy]){
-      st.players[previewBy].chips += reward;
+      st.players[previewBy].chips += meta.reward;
       st.players[previewBy].previewSuc = (st.players[previewBy].previewSuc || 0) + 1;
-      log_(st, `💎✨ 成功！ 🎯予告状 ${st.players[previewBy].name} が +${reward}chip 独占！`, { kind:'success' });
+      log_(st, `💎✨ 成功！ 🎯予告状 ${st.players[previewBy].name} が +${meta.reward}chip 独占！`, { kind:'success' });
     } else if(pSeats.length > 0){
-      const share = Math.floor(reward / pSeats.length);
-      const remain = reward - share * pSeats.length;
+      const share = Math.floor(meta.reward / pSeats.length);
+      const remain = meta.reward - share * pSeats.length;
       // 最後に置いた実プレイヤーから順に余りを渡す
       const orderedSeats = [...pSeats].sort((a,b) => {
         const aLast = sf.cards.map((c,i)=>[c.owner,i]).filter(x=>x[0]===a).pop()?.[1] ?? -1;
@@ -682,18 +605,18 @@ function judgeSafe(st, safeIdx, room){
       }
     }
 
-    // 奇跡の解錠: 金庫内カードがすべてゴースト/ノイズで成功
+    // ★Q3: 奇跡の解錠 - 金庫内カードがすべてゴースト/ノイズで成功
     const allGhostOrNoise = sf.cards.every(c => c.isGhost || c.isNoise || c.owner === GHOST_OWNER);
     if(allGhostOrNoise && lastAnyPlacer && lastAnyPlacer !== GHOST_OWNER && st.players[lastAnyPlacer]){
       const lp = st.players[lastAnyPlacer];
       lp.chips += ALL_GHOST_BONUS;
+      lp.handAdjustRight = (lp.handAdjustRight || 0) + 1;
       pushEvent(st, { type:'all_ghost', by:lastAnyPlacer, byName:lp.name });
-      log_(st, `🌟👻 奇跡の解錠発動！ 全ゴースト/ノイズで成功 → ${lp.name} に追加 +${ALL_GHOST_BONUS}chip ボーナス`, { kind:'success' });
+      log_(st, `🌟👻 Q3 奇跡の解錠発動！ 全ゴースト/ノイズで成功 → ${lp.name} に +${ALL_GHOST_BONUS}chip & 手札調整権 (次ターン1ドロー+1ディスカード)`, { kind:'success' });
     }
   } else if(result === 'NEAR'){
-    pushEvent(st, { type:'near', safeKind:sf.kind, sum, target, mult });
-    const reward = Math.floor((meta.reward * mult) / 2);
-    if(mult > 1) log_(st, `🎰 倍率ドン！ニアピン報酬${mult}倍適用`, { kind:'success' });
+    pushEvent(st, { type:'near', safeKind:sf.kind, sum, target });
+    const reward = Math.floor(meta.reward / 2);
     if(previewBy && st.players[previewBy]){
       st.players[previewBy].chips += reward;
       st.players[previewBy].previewSuc = (st.players[previewBy].previewSuc || 0) + 1;
@@ -721,22 +644,20 @@ function judgeSafe(st, safeIdx, room){
     const isGhostCulprit = culprit === GHOST_OWNER;
     const culpritName = isGhostCulprit ? '👻ゴースト' : (st.players[culprit]?.name || culprit);
 
-    pushEvent(st, { type:'burst', safeKind:sf.kind, sum, target, culprit: isGhostCulprit ? '' : culprit, culpritName, culpritValue, mult });
+    pushEvent(st, { type:'burst', safeKind:sf.kind, sum, target, culprit: isGhostCulprit ? '' : culprit, culpritName, culpritValue });
     log_(st, `💥💥💥 バースト発生！ 合計${sum} > 目標${target}`, { kind:'burst' });
     log_(st, `⚠️ 犯人: ${culpritName} (最後に${culpritValue}を投入) ⚠️`, { kind:'burst' });
-    if(mult > 1) log_(st, `🎰 倍率ドン！ペナルティ${mult}倍適用`, { kind:'burst' });
     st.turnBursts = (st.turnBursts || 0) + 1;
-    // 1ターン内に 2+ バーストで特典判定（犯人がプレイヤーの場合）
+    // ★Q1/Q2: 1ターン内に 2+ バーストで特典判定（犯人がプレイヤーの場合）
     if(!isGhostCulprit && st.turnBursts >= 2){
       checkMultiBurstBonus(st, culprit);
     }
 
-    // 犯人ペナルティ（倍率ドン適用）
-    const burstPenalty = meta.burst * mult;
+    // 犯人ペナルティ
     if(!isGhostCulprit && st.players[culprit]){
-      st.players[culprit].chips += burstPenalty;
+      st.players[culprit].chips += meta.burst;
       st.players[culprit].bursts = (st.players[culprit].bursts || 0) + 1;
-      log_(st, `💥 犯人 ${culpritName} ${burstPenalty}chip (累積💥${st.players[culprit].bursts}/${BURST_TO_TRIGGER_CLUMSY})`, { kind:'burst' });
+      log_(st, `💥 犯人 ${culpritName} ${meta.burst}chip (累積💥${st.players[culprit].bursts}/${BURST_TO_TRIGGER_CLUMSY})`, { kind:'burst' });
     } else {
       log_(st, `👻 ゴースト犯人のため現プレイヤーのペナルティなし`);
     }
@@ -767,10 +688,9 @@ function judgeSafe(st, safeIdx, room){
   }
   st.safes[safeIdx] = null;
   log_(st, `━━━━━━━━━━━━━━━━━━━━━━`);
-  return true;
 }
 
-/* ==== 同時バースト（1ターン内に2金庫以上バースト）特典判定 ==== */
+/* ==== Q1/Q2: 同時バースト（1ターン内に2金庫以上バースト）特典判定 ==== */
 function checkMultiBurstBonus(st, seat){
   // 1ターン中に発生したバースト数が2回以上なら特典
   if((st.turnBursts || 0) < 2) return;
@@ -779,7 +699,7 @@ function checkMultiBurstBonus(st, seat){
   st.players[seat].chips += MULTI_BURST_BONUS;
   st.players[seat].multiBurstBonus = (st.players[seat].multiBurstBonus || 0) + 1;
   pushEvent(st, { type:'multiburst', by:seat, byName:st.players[seat].name, bursts:st.turnBursts });
-  log_(st, `🌟💥 同時バースト特典発動！ ${st.players[seat].name} は1ターン中に${st.turnBursts}回バースト → +${MULTI_BURST_BONUS}chip補償 & 次ターン『コード・スワップ権』を獲得 (場のカード2枚を交換)`, { kind:'success' });
+  log_(st, `🌟💥 Q1/Q2 同時バースト特典発動！ ${st.players[seat].name} は1ターン中に${st.turnBursts}回バースト → +${MULTI_BURST_BONUS}chip補償 & 次ターン『コード・スワップ権』を獲得 (ドジ怪盗即時発動権)`, { kind:'success' });
   // 次ターン 2カード入れ替え権を付与
   st.players[seat].codeSwapPendingUntil = (st.turnSerial || 0) + 2;
 }
@@ -1008,23 +928,27 @@ function processAction(room, seat, action){
     } else {
       log_(st, `🃏 ${p.name} が${meta.label}金庫に配置 (${sf.cards.length}/${meta.count})`, { private:{ [seat]: `🃏自分の配置=${card.n}` } });
     }
-    pushEvent(st, { type:'place', by:seat, byName:p.name, safeIdx, cardCount:sf.cards.length, cap:meta.count });
 
-    // ★毎回判定：sum>=target またはフルで判定される
-    const judged = judgeSafe(st, safeIdx, room);
+    let judged = false;
+    if(sf.cards.length >= meta.count){
+      judgeSafe(st, safeIdx, room);
+      judged = true;
+    }
 
     if(st.mode === 'duel'){
       // デュエル: 配置後はノイズ配置フェーズへ（金庫が残っていて山札もある場合）
-      if(judged){ refillSafes(st, room); if(checkGameEnd(st, room)) return; }
       st.deck = arr(st.deck);
       const stillHasSafe = arr(st.safes).some(s => s !== null);
       if(st.deck.length > 0 && stillHasSafe){
         st.phase = 'choose_noise';
         log_(st, `👻 ${p.name} はノイズ配置 (山札から1枚を見ずに伏せる)`);
+        if(judged){ refillSafes(st); if(checkGameEnd(st, room)) return; }
+        // 補充は行わず、ノイズ配置後に実施
         return;
       } else {
         // 山札なし or 金庫なし: ノイズスキップして手札補充 → 次ターン
         drawToHand(st, seat);
+        if(judged){ refillSafes(st); if(checkGameEnd(st, room)) return; }
         advanceTurn(st, room);
         return;
       }
@@ -1033,57 +957,43 @@ function processAction(room, seat, action){
     // パーティモード
     drawToHand(st, seat);
     if(judged){
-      refillSafes(st, room);
+      refillSafes(st);
       if(checkGameEnd(st, room)) return;
     }
-    // ラスト・ルーレット評価（パーティ専用）
-    maybeApplyLastRoulette(st);
     advanceTurn(st, room);
     return;
   }
 
   if(action.type === 'noise_pass'){
-    // デュエルのノイズ配置フェーズを chip 支払ってパス（1回目=1, 2回目以降=2）
+    // Q7: デュエルのノイズ配置フェーズを 1chip 支払ってパス
     assertTurn(st, seat);
     if(st.mode !== 'duel') throw new Error('デュエルモード専用');
     if(st.phase !== 'choose_noise') throw new Error('ノイズ配置フェーズではない');
     const p = st.players[seat];
-    const passUsed = p.noisePassCount || 0;
-    const cost = passUsed === 0 ? NOISE_PASS_COST_FIRST : NOISE_PASS_COST_REPEAT;
-    if(p.chips < cost) throw new Error(`ノイズパスには ${cost}chip 必要 (現在${p.chips}, 使用回数${passUsed})`);
-    p.chips -= cost;
-    p.noisePassCount = passUsed + 1;
-    log_(st, `👻💨 ${p.name} が ${cost}chip 支払ってノイズ配置をパス (使用${p.noisePassCount}回目)`);
-    pushEvent(st, { type:'noise_pass', by:seat, byName:p.name, cost });
+    if(p.chips < NOISE_PASS_COST) throw new Error(`ノイズパスには ${NOISE_PASS_COST}chip 必要 (現在${p.chips})`);
+    p.chips -= NOISE_PASS_COST;
+    log_(st, `👻💨 ${p.name} が ${NOISE_PASS_COST}chip 支払ってノイズ配置をパス (Q7)`);
+    pushEvent(st, { type:'noise_pass', by:seat, byName:p.name });
     drawToHand(st, seat);
     advanceTurn(st, room);
     if(checkGameEnd(st, room)) return;
     return;
   }
 
-  if(action.type === 'board_swap'){
-    // 同時バースト特典: 場の2枚のカードを入れ替える
-    assertTurn(st, seat);
+  if(action.type === 'hand_adjust'){
+    // Q3特典の手札調整: 1ドロー+1ディスカード
+    if(!st) throw new Error('未開始');
     const p = st.players[seat];
-    const pendUntil = p.codeSwapPendingUntil || 0;
-    if(pendUntil <= 0 || pendUntil < (st.turnSerial || 0)) throw new Error('コード・スワップ権なしまたは期限切れ');
-    const a = action.a, b = action.b;
-    if(!a || !b) throw new Error('2枚選択必要');
-    if(a.safeIdx === b.safeIdx && a.cardIdx === b.cardIdx) throw new Error('同じカード不可');
-    const sA = st.safes[a.safeIdx], sB = st.safes[b.safeIdx];
-    if(!sA || !sB) throw new Error('金庫不正');
-    sA.cards = arr(sA.cards); sB.cards = arr(sB.cards);
-    if(a.cardIdx<0||a.cardIdx>=sA.cards.length||b.cardIdx<0||b.cardIdx>=sB.cards.length) throw new Error('カード不正');
-    const cA = sA.cards[a.cardIdx], cB = sB.cards[b.cardIdx];
-    sA.cards[a.cardIdx] = cB; sB.cards[b.cardIdx] = cA;
-    p.codeSwapPendingUntil = 0;
-    pushEvent(st, { type:'board_swap', by:seat, byName:p.name, a, b });
-    log_(st, `💱✨ ${p.name} がコード・スワップで場の2枚を入れ替え`, { kind:'success' });
-    [a.safeIdx, b.safeIdx].forEach(idx => {
-      if(st.safes[idx]) judgeSafe(st, idx, room);
-    });
-    refillSafes(st, room);
-    if(checkGameEnd(st, room)) return;
+    if(!p || (p.handAdjustRight||0) <= 0) throw new Error('手札調整権なし');
+    const discardIdx = action.discardIdx;
+    p.hand = arr(p.hand);
+    if(discardIdx < 0 || discardIdx >= p.hand.length) throw new Error('カード不正');
+    const discarded = p.hand.splice(discardIdx, 1)[0];
+    st.discard = arr(st.discard);
+    st.discard.push({ id:discarded.id, n:discarded.n });
+    drawToHand(st, seat);
+    p.handAdjustRight -= 1;
+    log_(st, `🎴 ${p.name} が手札調整を実施 (1枚捨てて1枚ドロー / Q3特典)`);
     return;
   }
 
@@ -1107,12 +1017,14 @@ function processAction(room, seat, action){
     const noise = st.deck.pop();
     sf.cards.push({ id:noise.id, n:noise.n, owner:seat, isNoise:true });
     log_(st, `👻 ${p.name} が${meta.label}金庫にノイズカードを伏せ (${sf.cards.length}/${meta.count})`);
-    pushEvent(st, { type:'place', by:seat, byName:p.name, safeIdx, cardCount:sf.cards.length, cap:meta.count, isNoise:true });
 
-    // ★ノイズ配置も毎回判定対象（sum>=target またはフルで判定）
-    const judged = judgeSafe(st, safeIdx, room);
+    let judged = false;
+    if(sf.cards.length >= meta.count){
+      judgeSafe(st, safeIdx, room);
+      judged = true;
+    }
     if(judged){
-      refillSafes(st, room);
+      refillSafes(st);
       if(checkGameEnd(st, room)) return;
     }
     // 手札補充
@@ -1198,7 +1110,6 @@ async function createRoom(){
     S.roomId = rid;
     S.seat = 'P1';
     S.isSpectator = false;
-    S.lastShownEvent = Date.now();   // 新規部屋作成時は現在時刻以降のイベントだけ表示
     localStorage.setItem('mc_lastRoom', rid);
     subscribeRoom();
     toast('✅ 部屋作成 ' + rid + ' (' + room.mode + ')');
@@ -1245,7 +1156,7 @@ async function joinRoom(){
       const isFull = used.size >= cfg.maxP;
       const isPlaying = room.status === 'playing' || room.status === 'ended';
       if(isFull || isPlaying){
-        // 観戦者上限チェック（20名）
+        // Q11: 観戦者上限チェック（20名）
         const specCount = Object.keys(room.spectators).length;
         if(specCount >= MAX_SPECTATORS){
           mySeat = 'FULL';
@@ -1265,7 +1176,7 @@ async function joinRoom(){
           return room;
         }
       }
-      // 観戦者上限チェック
+      // Q11: 観戦者上限チェック
       const specCount = Object.keys(room.spectators).length;
       if(specCount >= MAX_SPECTATORS){
         mySeat = 'FULL';
@@ -1281,7 +1192,6 @@ async function joinRoom(){
     S.roomId = rid;
     S.seat = mySeat;
     S.isSpectator = asSpectator;
-    S.lastShownEvent = Date.now();   // 入室時点にリセットして以降のイベントだけカットイン表示
     localStorage.setItem('mc_lastRoom', rid);
     subscribeRoom();
     toast(asSpectator ? '👁️観戦モードで入室 ' + rid : '✅入室 ' + rid + ' (' + mySeat + ')');
@@ -1313,7 +1223,6 @@ async function tryRejoin(){
       S.seat = mySeat;
       S.isSpectator = asSpec;
       S.name = asSpec ? room.spectators[S.token].name : players[mySeat].name;
-      S.lastShownEvent = Date.now();   // 再入場時もリセットして古いイベントを再生しない
       document.getElementById('pname').value = S.name;
       subscribeRoom();
       toast(asSpec ? '👁️観戦で再入場 ' + rid : '✅再入場 ' + rid);
@@ -1422,8 +1331,11 @@ async function resetGame(){
 }
 async function doPlace(cardIdx, safeIdx, preview){ await sendAction({ type:'place', cardIdx, safeIdx, preview }); }
 async function doNoise(safeIdx){ await sendAction({ type:'noise', safeIdx }); }
-async function doNoisePass(){ await sendAction({ type:'noise_pass' }); }
-async function doBoardSwap(a, b){ await sendAction({ type:'board_swap', a, b }); }
+async function doNoisePass(){ 
+  if(!confirm(`ノイズ配置を ${NOISE_PASS_COST}chip で放棄しますか？ (Q7ルール)`)) return;
+  await sendAction({ type:'noise_pass' }); 
+}
+async function doHandAdjust(discardIdx){ await sendAction({ type:'hand_adjust', discardIdx }); }
 async function doScout(safeIdx, cardIdx){ await sendAction({ type:'scout', safeIdx, cardIdx }); }
 async function doPass(){ await sendAction({ type:'pass' }); }
 async function doClumsyFire(){ await sendAction({ type:'clumsy_fire' }); }
@@ -1523,10 +1435,8 @@ function renderSafes(r, st){
       <div class="muted">${cards.length}/${meta.count}枚 | 💎+${meta.reward} 💥${meta.burst}</div>
       <div class="slots" id="slots_${idx}"></div>
     `;
-    if(sf.rouletteMult && sf.rouletteMult > 1) div.classList.add('roulette');
     div.onclick = ()=>{
       if(S.isSpectator) return;
-      if(S.swapMode) return;        // スワップモードでは全体クリックを無視（カード個別クリックで選択）
       if(S.scoutMode) return;
       // デュエル: ノイズ配置モード
       if(st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat){
@@ -1559,27 +1469,6 @@ function renderSafes(r, st){
         }
         const cardEl = document.createElement('div');
         cardEl.className = 'card ' + backCls;
-        cardEl.dataset.safe = idx;
-        cardEl.dataset.card = i;
-        // スワップ選択モード: このカードが選択中ならハイライト
-        if(S.swapMode && S.swapSel.some(p => p.safeIdx===idx && p.cardIdx===i)){
-          cardEl.classList.add('swap-sel');
-        }
-        // スワップモード: 個別カードクリックで選択
-        if(S.swapMode && !S.isSpectator){
-          cardEl.style.cursor = 'pointer';
-          cardEl.onclick = (e) => {
-            e.stopPropagation();
-            const exists = S.swapSel.findIndex(p => p.safeIdx===idx && p.cardIdx===i);
-            if(exists >= 0){
-              S.swapSel.splice(exists, 1);
-            } else {
-              if(S.swapSel.length >= 2){ S.swapSel.shift(); }
-              S.swapSel.push({ safeIdx:idx, cardIdx:i });
-            }
-            renderAll();
-          };
-        }
 
         if(S.peekingCard && S.peekingCard.safeIdx === idx && S.peekingCard.cardIdx === i){
           cardEl.className = 'card peek';
@@ -1749,19 +1638,28 @@ function renderActPanel(r, st){
       pb.onclick = doPass;
       btns.appendChild(pb);
     } else {
-      // 1回目=1chip / 2回目以降=2chip でノイズ配置をパス
-      const passUsed = p.noisePassCount || 0;
-      const cost = passUsed === 0 ? NOISE_PASS_COST_FIRST : NOISE_PASS_COST_REPEAT;
-      const canAfford = (p.chips || 0) >= cost;
+      // Q7: 1chip 支払ってノイズ配置をパス
+      const canAfford = (p.chips || 0) >= NOISE_PASS_COST;
       const npb = document.createElement('button');
-      npb.textContent = `💨 ノイズパス (-${cost}chip)`;
+      npb.textContent = `💨 ノイズパス (-${NOISE_PASS_COST}chip)`;
       npb.disabled = !canAfford;
-      npb.title = `ノイズ配置パス${passUsed+1}回目 コスト ${cost}chip`;
-      npb.onclick = async () => {
-        if(!confirm(`ノイズ配置を ${cost}chip でパスしますか？ (使用${passUsed+1}回目)`)) return;
-        await doNoisePass();
-      };
+      npb.title = `Q7: ${NOISE_PASS_COST}chip 支払ってノイズ配置を放棄`;
+      npb.onclick = doNoisePass;
       btns.appendChild(npb);
+    }
+    // Q3: 手札調整権があれば表示
+    if((p.handAdjustRight||0) > 0){
+      const hab = document.createElement('button');
+      hab.className = 'primary';
+      hab.textContent = `🎴 手札調整 (Q3特典 残${p.handAdjustRight})`;
+      hab.onclick = () => {
+        const hand = arr(p.hand);
+        if(hand.length === 0){ toast('手札が空です'); return; }
+        const idxStr = prompt(`捨てる手札番号 (1-${hand.length}): ` + hand.map((c,i)=>`[${i+1}]${c.n}`).join(' '));
+        const idx = parseInt(idxStr,10)-1;
+        if(!isNaN(idx) && idx >= 0 && idx < hand.length) doHandAdjust(idx);
+      };
+      btns.appendChild(hab);
     }
     return;
   }
@@ -1804,37 +1702,7 @@ function renderActPanel(r, st){
   };
   btns.appendChild(passBtn);
 
-  // コードスワップ権（同時バースト特典）が付与されているときのUI
-  const csUntil = p.codeSwapPendingUntil || 0;
-  const csActive = csUntil > 0 && csUntil >= (st.turnSerial || 0);
-  if(csActive){
-    if(!S.swapMode){
-      const csBtn = document.createElement('button');
-      csBtn.className = 'success';
-      csBtn.textContent = `💱 コード・スワップ (場の2枚交換)`;
-      csBtn.title = '同時バースト特典: 場のカード2枚を選んで位置を入れ替える';
-      csBtn.onclick = () => { S.swapMode = true; S.swapSel = []; S.scoutMode = false; S.selCard = -1; renderAll(); };
-      btns.appendChild(csBtn);
-    } else {
-      info.innerHTML = `💱 <b class="warn">コードスワップ選択中</b> - 場のカードを2枚タップ (現在${S.swapSel.length}/2)`;
-      const ok = document.createElement('button');
-      ok.className = 'success';
-      ok.textContent = `✅ 交換実行 (${S.swapSel.length}/2)`;
-      ok.disabled = S.swapSel.length !== 2;
-      ok.onclick = async () => {
-        if(S.swapSel.length !== 2) return;
-        await doBoardSwap(S.swapSel[0], S.swapSel[1]);
-        S.swapMode = false; S.swapSel = [];
-      };
-      btns.appendChild(ok);
-      const cancel = document.createElement('button');
-      cancel.textContent = '❌ キャンセル';
-      cancel.onclick = () => { S.swapMode = false; S.swapSel = []; renderAll(); };
-      btns.appendChild(cancel);
-    }
-  }
-
-  if(!S.swapMode && S.selCard >= 0 && S.selSafe >= 0){
+  if(S.selCard >= 0 && S.selSafe >= 0){
     const placeBtn = document.createElement('button');
     placeBtn.className = 'success';
     placeBtn.textContent = `✅ 金庫${S.selSafe+1}に配置${S.preview?'(🎯宣言)':''}`;
@@ -1990,8 +1858,6 @@ function renderEnd(r, st){
  * ============================================================================ */
 let _audioCtx = null;
 let soundEnabled = localStorage.getItem('mc_sound') !== 'off';
-let soundVolume = parseFloat(localStorage.getItem('mc_sound_vol') || '0.7');
-if(isNaN(soundVolume)) soundVolume = 0.7;
 
 function ensureAudio(){
   if(!_audioCtx){
@@ -2007,19 +1873,16 @@ function playSound(kind){
   const ctx = ensureAudio();
   if(!ctx) return;
   const now = ctx.currentTime;
-  // 音量係数（0.0〜1.0）
-  const _v = (typeof soundVolume === 'number') ? Math.max(0, Math.min(1, soundVolume)) : 1.0;
-  const V = (g) => g * _v;
   if(kind === 'unlock'){
     // 金庫解錠: メタリッククリック + チャイム
     const osc1 = ctx.createOscillator(), g1 = ctx.createGain();
     osc1.type='square'; osc1.frequency.setValueAtTime(1800, now); osc1.frequency.exponentialRampToValueAtTime(600, now+0.08);
-    g1.gain.setValueAtTime(V(0.15), now); g1.gain.exponentialRampToValueAtTime(0.001, now+0.1);
+    g1.gain.setValueAtTime(0.15, now); g1.gain.exponentialRampToValueAtTime(0.001, now+0.1);
     osc1.connect(g1).connect(ctx.destination); osc1.start(now); osc1.stop(now+0.12);
     [880, 1320, 1760].forEach((f,i)=>{
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type='sine'; o.frequency.value=f;
-      g.gain.setValueAtTime(0.0001, now+0.15+i*0.08); g.gain.exponentialRampToValueAtTime(V(0.2), now+0.16+i*0.08); g.gain.exponentialRampToValueAtTime(0.001, now+0.6+i*0.08);
+      g.gain.setValueAtTime(0.0001, now+0.15+i*0.08); g.gain.exponentialRampToValueAtTime(0.2, now+0.16+i*0.08); g.gain.exponentialRampToValueAtTime(0.001, now+0.6+i*0.08);
       o.connect(g).connect(ctx.destination); o.start(now+0.15+i*0.08); o.stop(now+0.65+i*0.08);
     });
   } else if(kind === 'burst'){
@@ -2029,33 +1892,27 @@ function playSound(kind){
     const data = buf.getChannelData(0);
     for(let i=0;i<bufSize;i++){ data[i] = (Math.random()*2-1) * Math.pow(1-i/bufSize, 2); }
     const src = ctx.createBufferSource(); src.buffer = buf;
-    const g = ctx.createGain(); g.gain.setValueAtTime(V(0.4), now); g.gain.exponentialRampToValueAtTime(0.001, now+0.7);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.4, now); g.gain.exponentialRampToValueAtTime(0.001, now+0.7);
     const filt = ctx.createBiquadFilter(); filt.type='lowpass'; filt.frequency.value=800;
     src.connect(filt).connect(g).connect(ctx.destination); src.start(now);
     const osc = ctx.createOscillator(), og = ctx.createGain();
     osc.type='sawtooth'; osc.frequency.setValueAtTime(120, now); osc.frequency.exponentialRampToValueAtTime(30, now+0.4);
-    og.gain.setValueAtTime(V(0.3), now); og.gain.exponentialRampToValueAtTime(0.001, now+0.45);
+    og.gain.setValueAtTime(0.3, now); og.gain.exponentialRampToValueAtTime(0.001, now+0.45);
     osc.connect(og).connect(ctx.destination); osc.start(now); osc.stop(now+0.5);
   } else if(kind === 'warn'){
     // シュパッ! (警告音)
     const osc = ctx.createOscillator(), g = ctx.createGain();
     osc.type='sawtooth'; osc.frequency.setValueAtTime(200, now); osc.frequency.exponentialRampToValueAtTime(1400, now+0.12);
-    g.gain.setValueAtTime(V(0.2), now); g.gain.exponentialRampToValueAtTime(0.001, now+0.15);
+    g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now+0.15);
     osc.connect(g).connect(ctx.destination); osc.start(now); osc.stop(now+0.18);
   } else if(kind === 'near'){
     // ニアピン (短い二連音)
     [900, 700].forEach((f,i)=>{
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type='triangle'; o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, now+i*0.1); g.gain.exponentialRampToValueAtTime(V(0.15), now+i*0.1+0.01); g.gain.exponentialRampToValueAtTime(0.001, now+i*0.1+0.12);
+      g.gain.setValueAtTime(0.0001, now+i*0.1); g.gain.exponentialRampToValueAtTime(0.15, now+i*0.1+0.01); g.gain.exponentialRampToValueAtTime(0.001, now+i*0.1+0.12);
       o.connect(g).connect(ctx.destination); o.start(now+i*0.1); o.stop(now+i*0.1+0.14);
     });
-  } else if(kind === 'place'){
-    // カード配置音（カチッ!）
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type='square'; o.frequency.setValueAtTime(2400, now); o.frequency.exponentialRampToValueAtTime(800, now+0.04);
-    g.gain.setValueAtTime(V(0.08), now); g.gain.exponentialRampToValueAtTime(0.001, now+0.06);
-    o.connect(g).connect(ctx.destination); o.start(now); o.stop(now+0.07);
   }
 }
 
@@ -2066,13 +1923,6 @@ function toggleSound(){
   if(b) b.textContent = soundEnabled ? '🔊 SE' : '🔇 SE';
   toast(soundEnabled ? '🔊 効果音 ON' : '🔇 効果音 OFF');
   if(soundEnabled){ ensureAudio(); playSound('near'); }
-}
-
-function setSoundVolume(v){
-  soundVolume = Math.max(0, Math.min(1, parseFloat(v)));
-  localStorage.setItem('mc_sound_vol', String(soundVolume));
-  const lbl = document.getElementById('volLabel');
-  if(lbl) lbl.textContent = Math.round(soundVolume * 100) + '%';
 }
 
 function hardReset(){
@@ -2094,13 +1944,11 @@ function hardReset(){
 function showEvent(ev, room){
   if(ev.type === 'success'){
     const meta = SAFE_META[ev.safeKind];
-    const mlt = ev.mult > 1 ? ` ×${ev.mult}` : '';
-    triggerCutin('💎✨', `${meta.label}金庫 成功！ +${meta.reward * (ev.mult||1)}chip${mlt}${ev.previewBy?' 独占':''}`, 'success');
+    triggerCutin('💎✨', `${meta.label}金庫 成功！ +${meta.reward}chip${ev.previewBy?' 独占':''}`, 'success');
     playSound('unlock');
   } else if(ev.type === 'near'){
     const meta = SAFE_META[ev.safeKind];
-    const mlt = ev.mult > 1 ? ` ×${ev.mult}` : '';
-    triggerCutin('🎯', `ニアピン！半額報酬${mlt}`, 'near');
+    triggerCutin('🎯', 'ニアピン！半額報酬', 'near');
     playSound('near');
   } else if(ev.type === 'burst'){
     triggerCutin('💥', '💥 ドカン！バースト！ 犯人: ' + ev.culpritName + ' (' + ev.culpritValue + ')', 'culprit');
@@ -2124,31 +1972,13 @@ function showEvent(ev, room){
     triggerCutin('💱✨', 'コード・スワップ発動！ by ' + ev.byName, 'success');
     playSound('unlock');
   } else if(ev.type === 'multiburst'){
-    triggerCutin('🌟💥', `同時バースト特典！ ${ev.byName} に補償${MULTI_BURST_BONUS}chip + コードスワップ権`, 'success');
+    triggerCutin('🌟💥', `Q1/Q2 同時バースト特典！ ${ev.byName} に補償${MULTI_BURST_BONUS}chip`, 'success');
     playSound('warn');
   } else if(ev.type === 'all_ghost'){
-    triggerCutin('🌟👻', `奇跡の解錠！ ${ev.byName} に +${ALL_GHOST_BONUS}chipボーナス`, 'success');
+    triggerCutin('🌟👻', `奇跡の解錠！ ${ev.byName} にボーナス`, 'success');
     playSound('unlock');
   } else if(ev.type === 'noise_pass'){
-    triggerCutin('💨', `${ev.byName} がノイズ配置をパス (-${ev.cost||1}chip)`, '');
-  } else if(ev.type === 'place'){
-    playSound('place');
-  } else if(ev.type === 'last_roulette'){
-    triggerCutin('🎰🔥', `ラスト・ルーレット！ 金庫${ev.safeIdx+1}が倍率ドンに選ばれた`, 'success');
-    playSound('warn');
-  } else if(ev.type === 'sudden_death'){
-    triggerCutin('⚡', `最終局面突入！ 山札枯渇 - 金庫補充/ゴースト供給停止`, 'culprit');
-    playSound('burst');
-  } else if(ev.type === 'board_swap'){
-    triggerCutin('💱✨', `${ev.byName} が場のカード2枚をコードスワップ！`, 'success');
-    playSound('unlock');
-    // スライドアニメーションヒントは UI 側で .swap-flash を付与
-    setTimeout(()=>{
-      [ev.a, ev.b].forEach(p => {
-        const el = document.querySelector(`[data-safe="${p.safeIdx}"][data-card="${p.cardIdx}"]`);
-        if(el){ el.classList.add('swap-flash'); setTimeout(()=>el.classList.remove('swap-flash'), 1500); }
-      });
-    }, 600);
+    triggerCutin('💨', `${ev.byName} がノイズ配置をパス (-${NOISE_PASS_COST}chip)`, '');
   }
 }
 
@@ -2202,24 +2032,20 @@ window.doClumsySkip = doClumsySkip;
 window.doCodeSwapFire = doCodeSwapFire;
 window.doCodeSwapSkip = doCodeSwapSkip;
 window.doNoisePass = doNoisePass;
-window.doBoardSwap = doBoardSwap;
+window.doHandAdjust = doHandAdjust;
 window.toggleSound = toggleSound;
 window.hardReset = hardReset;
 
-// サウンドボタン/スライダー初期化
+// サウンドボタン初期化
 window.addEventListener('DOMContentLoaded', ()=>{
   const b = document.getElementById('soundBtn');
   if(b) b.textContent = soundEnabled ? '🔊 SE' : '🔇 SE';
-  const sl = document.getElementById('volSlider');
-  if(sl){ sl.value = Math.round(soundVolume*100); }
-  const lbl = document.getElementById('volLabel');
-  if(lbl) lbl.textContent = Math.round(soundVolume*100) + '%';
 });
 
 // 内部テスト用エクスポート
-window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, refillSafes, maybeApplyLastRoulette, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST_FIRST, NOISE_PASS_COST_REPEAT, LAST_ROULETTE_DECK_THRESHOLD, LAST_ROULETTE_FIRST_PROB, LAST_ROULETTE_REPEAT_PROB, MAX_SPECTATORS };
+window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, MAX_SPECTATORS };
 
-console.log('[MC v6] Loaded. Waiting for Firebase...');
+console.log('[MC v5] Loaded. Waiting for Firebase...');
 </script>
 
 </body>
