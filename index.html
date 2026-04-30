@@ -56,6 +56,9 @@ label{color:var(--muted);font-size:13px}
 .safe{display:inline-block;background:var(--bg2);border:3px solid var(--border);border-radius:14px;padding:10px;margin:6px;min-width:170px;vertical-align:top;position:relative;cursor:pointer;transition:all .2s}
 .safe:hover{border-color:var(--accent);transform:translateY(-2px)}
 .safe.sel{border-color:var(--accent);box-shadow:0 0 15px rgba(242,201,76,.5)}
+.safe.noise-target{border-color:var(--ghost);box-shadow:0 0 14px rgba(155,89,182,.6);animation:noisePulse 1.4s infinite}
+.safe.noise-target::before{content:'👻タップでノイズ配置';position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:var(--ghost);color:#fff;font-weight:bold;font-size:11px;padding:2px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.4);white-space:nowrap}
+@keyframes noisePulse{0%,100%{box-shadow:0 0 10px rgba(155,89,182,.5)}50%{box-shadow:0 0 22px rgba(155,89,182,.9)}}
 .safe.roulette{border-color:#ff44aa;background:linear-gradient(135deg,#3a1530,#1a2240);box-shadow:0 0 14px rgba(255,68,170,.5);animation:rouletteGlow 2s infinite}
 .safe.roulette::after{content:'\1f3b0 \d7 2';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,#ff44aa,#ffd54a);color:#111;font-weight:bold;font-size:11px;padding:2px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 @keyframes rouletteGlow{0%,100%{box-shadow:0 0 14px rgba(255,68,170,.5)}50%{box-shadow:0 0 24px rgba(255,213,74,.7)}}
@@ -1644,6 +1647,9 @@ function renderSafes(r, st){
     }
     const cards = arr(sf.cards);
     const mult = sf.roulette ? 2 : 1;
+    // v9-FIX: ノイズ配置フェーズ中、自分の手番で満杯でない金庫にコールサインを強調表示
+    const isNoiseTarget = (st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat && cards.length < meta.count && arr(st.deck).length > 0);
+    if(isNoiseTarget) div.classList.add('noise-target');
     div.innerHTML = `
       ${flag}
       <div class="label">${meta.label}金庫 ${idx+1}${sf.roulette?' 🎰':''}</div>
@@ -1658,7 +1664,8 @@ function renderSafes(r, st){
       // デュエル: ノイズ配置モード
       if(st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat){
         if(cards.length >= meta.count){ toast('⚠️ 満杯'); return; }
-        if(confirm(`${meta.label}金庫${idx+1}にノイズ配置しますか？（山札から1枚伏せる）`)){
+        if(arr(st.deck).length === 0){ toast('⚠️ 山札空'); return; }
+        if(confirm(`👻 ${meta.label}金庫${idx+1}にノイズ配置しますか？\n山札から1枚を見ずに伏せて配置します。`)){
           doNoise(idx);
         }
         return;
@@ -1873,8 +1880,9 @@ function renderActPanel(r, st){
 
   // デュエル: ノイズ配置フェーズ
   if(st.mode === 'duel' && st.phase === 'choose_noise'){
-    info.innerHTML = '👻 <b class="warn">ノイズ配置フェーズ</b> - 山札から1枚を好きな金庫に伏せてください（中身は見えません）';
-    if(arr(st.deck).length === 0){
+    const deckLeft = arr(st.deck).length;
+    info.innerHTML = `👻 <b class="warn" style="font-size:15px">ノイズ配置フェーズ</b> — 金庫をタップして山札から1枚を伏せて配置してください（中身は見えません） <span class="muted">山札残り:${deckLeft}</span>`;
+    if(deckLeft === 0){
       info.innerHTML += ' <span class="muted">(山札空のためパスできます)</span>';
       const pb = document.createElement('button');
       pb.textContent = '🏃 パス (山札空)';
@@ -1882,12 +1890,15 @@ function renderActPanel(r, st){
       pb.onclick = doPass;
       btns.appendChild(pb);
     } else {
-      // Q7: 1chip 支払ってノイズ配置をパス
-      const canAfford = (p.chips || 0) >= NOISE_PASS_COST;
+      // v9-FIX: NOISE_PASS_COST(未定義)を累進課税制に修正
+      // 1枚目=NOISE_PASS_BASE_COST, 2枚目以降=NOISE_PASS_NEXT_COST
+      const passCnt = p.noisePassCount || 0;
+      const npCost = passCnt === 0 ? NOISE_PASS_BASE_COST : NOISE_PASS_NEXT_COST;
+      const canAfford = (p.chips || 0) >= npCost;
       const npb = document.createElement('button');
-      npb.textContent = `💨 ノイズパス (-${NOISE_PASS_COST}chip)`;
+      npb.textContent = `💨 ノイズパス (-${npCost}chip${passCnt>0?' 累計'+passCnt+'回':''})`;
       npb.disabled = !canAfford;
-      npb.title = `Q7: ${NOISE_PASS_COST}chip 支払ってノイズ配置を放棄`;
+      npb.title = `累進課税: 1枚目=${NOISE_PASS_BASE_COST}chip / 2枚目以降=${NOISE_PASS_NEXT_COST}chip を支払ってノイズ配置を放棄`;
       npb.onclick = doNoisePass;
       btns.appendChild(npb);
     }
