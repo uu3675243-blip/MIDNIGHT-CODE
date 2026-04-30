@@ -56,9 +56,6 @@ label{color:var(--muted);font-size:13px}
 .safe{display:inline-block;background:var(--bg2);border:3px solid var(--border);border-radius:14px;padding:10px;margin:6px;min-width:170px;vertical-align:top;position:relative;cursor:pointer;transition:all .2s}
 .safe:hover{border-color:var(--accent);transform:translateY(-2px)}
 .safe.sel{border-color:var(--accent);box-shadow:0 0 15px rgba(242,201,76,.5)}
-.safe.noise-target{border-color:var(--ghost);box-shadow:0 0 14px rgba(155,89,182,.6);animation:noisePulse 1.4s infinite}
-.safe.noise-target::before{content:'👻タップでノイズ配置';position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:var(--ghost);color:#fff;font-weight:bold;font-size:11px;padding:2px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.4);white-space:nowrap}
-@keyframes noisePulse{0%,100%{box-shadow:0 0 10px rgba(155,89,182,.5)}50%{box-shadow:0 0 22px rgba(155,89,182,.9)}}
 .safe.roulette{border-color:#ff44aa;background:linear-gradient(135deg,#3a1530,#1a2240);box-shadow:0 0 14px rgba(255,68,170,.5);animation:rouletteGlow 2s infinite}
 .safe.roulette::after{content:'\1f3b0 \d7 2';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,#ff44aa,#ffd54a);color:#111;font-weight:bold;font-size:11px;padding:2px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 @keyframes rouletteGlow{0%,100%{box-shadow:0 0 14px rgba(255,68,170,.5)}50%{box-shadow:0 0 24px rgba(255,213,74,.7)}}
@@ -784,12 +781,8 @@ function judgeSafe(st, safeIdx, room){
       log_(st, `💥 🎯予告状失敗: ${st.players[previewBy].name} ${previewFailAmt}chip${sf.roulette?' 🎰×2':''}`, { kind:'burst' });
     }
   } else { // FAIL
-    // v9-FIX: failにも最後に置いた人(culprit)情報を含めて全員に演出
-    const failCulprit = lastAnyPlacer;
-    const isGhostFailCulprit = failCulprit === GHOST_OWNER;
-    const failCulpritName = isGhostFailCulprit ? '👻ゴースト' : (st.players[failCulprit]?.name || '?');
-    pushEvent(st, { type:'fail', safeKind:sf.kind, sum, target, culprit: isGhostFailCulprit ? '' : failCulprit, culpritName: failCulpritName });
-    log_(st, `❌ 不足 (合計${sum} ≤ 目標-2) - 全員報酬なし、金庫破棄`, { kind:'burst' });
+    pushEvent(st, { type:'fail', safeKind:sf.kind, sum, target });
+    log_(st, `❌ 不足 (合計${sum} ≤ 目標-2) - 全員報酬なし、金庫破棄`);
   }
 
   st.discard = arr(st.discard);
@@ -1647,9 +1640,6 @@ function renderSafes(r, st){
     }
     const cards = arr(sf.cards);
     const mult = sf.roulette ? 2 : 1;
-    // v9-FIX: ノイズ配置フェーズ中、自分の手番で満杯でない金庫にコールサインを強調表示
-    const isNoiseTarget = (st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat && cards.length < meta.count && arr(st.deck).length > 0);
-    if(isNoiseTarget) div.classList.add('noise-target');
     div.innerHTML = `
       ${flag}
       <div class="label">${meta.label}金庫 ${idx+1}${sf.roulette?' 🎰':''}</div>
@@ -1664,8 +1654,7 @@ function renderSafes(r, st){
       // デュエル: ノイズ配置モード
       if(st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat){
         if(cards.length >= meta.count){ toast('⚠️ 満杯'); return; }
-        if(arr(st.deck).length === 0){ toast('⚠️ 山札空'); return; }
-        if(confirm(`👻 ${meta.label}金庫${idx+1}にノイズ配置しますか？\n山札から1枚を見ずに伏せて配置します。`)){
+        if(confirm(`${meta.label}金庫${idx+1}にノイズ配置しますか？（山札から1枚伏せる）`)){
           doNoise(idx);
         }
         return;
@@ -1880,9 +1869,8 @@ function renderActPanel(r, st){
 
   // デュエル: ノイズ配置フェーズ
   if(st.mode === 'duel' && st.phase === 'choose_noise'){
-    const deckLeft = arr(st.deck).length;
-    info.innerHTML = `👻 <b class="warn" style="font-size:15px">ノイズ配置フェーズ</b> — 金庫をタップして山札から1枚を伏せて配置してください（中身は見えません） <span class="muted">山札残り:${deckLeft}</span>`;
-    if(deckLeft === 0){
+    info.innerHTML = '👻 <b class="warn">ノイズ配置フェーズ</b> - 山札から1枚を好きな金庫に伏せてください（中身は見えません）';
+    if(arr(st.deck).length === 0){
       info.innerHTML += ' <span class="muted">(山札空のためパスできます)</span>';
       const pb = document.createElement('button');
       pb.textContent = '🏃 パス (山札空)';
@@ -1890,15 +1878,12 @@ function renderActPanel(r, st){
       pb.onclick = doPass;
       btns.appendChild(pb);
     } else {
-      // v9-FIX: NOISE_PASS_COST(未定義)を累進課税制に修正
-      // 1枚目=NOISE_PASS_BASE_COST, 2枚目以降=NOISE_PASS_NEXT_COST
-      const passCnt = p.noisePassCount || 0;
-      const npCost = passCnt === 0 ? NOISE_PASS_BASE_COST : NOISE_PASS_NEXT_COST;
-      const canAfford = (p.chips || 0) >= npCost;
+      // Q7: 1chip 支払ってノイズ配置をパス
+      const canAfford = (p.chips || 0) >= NOISE_PASS_COST;
       const npb = document.createElement('button');
-      npb.textContent = `💨 ノイズパス (-${npCost}chip${passCnt>0?' 累計'+passCnt+'回':''})`;
+      npb.textContent = `💨 ノイズパス (-${NOISE_PASS_COST}chip)`;
       npb.disabled = !canAfford;
-      npb.title = `累進課税: 1枚目=${NOISE_PASS_BASE_COST}chip / 2枚目以降=${NOISE_PASS_NEXT_COST}chip を支払ってノイズ配置を放棄`;
+      npb.title = `Q7: ${NOISE_PASS_COST}chip 支払ってノイズ配置を放棄`;
       npb.onclick = doNoisePass;
       btns.appendChild(npb);
     }
@@ -2309,19 +2294,8 @@ function showEvent(ev, room){
       }, 500);
     }
   } else if(ev.type === 'fail'){
-    // v9-FIX: 全プレイヤーに演出を表示。犯人(最後に置いた人)情報も含める。
-    const culpritTxt = ev.culpritName ? ` 最後: ${ev.culpritName}` : '';
-    triggerCutin('❌', `不足 - 金庫破棄${culpritTxt}`, 'culprit');
+    triggerCutin('❌', '不足 - 金庫破棄', '');
     playSound('warn');
-    if(ev.culprit){
-      setTimeout(()=>{
-        const el = document.getElementById('player_' + ev.culprit);
-        if(el){
-          el.classList.add('culprit-flash');
-          setTimeout(()=>el.classList.remove('culprit-flash'), 3000);
-        }
-      }, 300);
-    }
   } else if(ev.type === 'clumsy'){
     triggerCutin('🏆💥', `伝説のドジ怪盗発動！ by ${ev.byName||'?'} → 全員${ev.avg||0}chip`, 'culprit');
     playSound('burst');
@@ -2362,12 +2336,9 @@ function showEvent(ev, room){
 const _cutinQueue = [];
 let _cutinPlaying = false;
 let _cutinTimer = null;
-let _cutinHideTimer = null;     // v9-FIX: triggerCutin の hide タイマーID
-let _cutinSerial = 0;            // v9-FIX: カットインのシリアルID
 const LIGHT_EVENT_TYPES = new Set(['place', 'scout_self', 'noise_pass']);
-const HEAVY_DURATION_MS = 1100; // v9-FIX: 1500→1100 (連続演出の取りこぼし防止)
-const HEAVY_GAP_MS = 1250;       // v9-FIX: 1700→1250 (連続演出の取りこぼし防止)
-const CUTIN_QUEUE_MAX = 24;     // v9-FIX: 8→24 (デュエルで連続バースト/不足が来ても破棄しない)
+const HEAVY_DURATION_MS = 1500; // メイン演出の表示時間（短めにして取りこぼし防止）
+const HEAVY_GAP_MS = 1700;       // メイン演出間の最小間隔
 
 function enqueueCutin(ev, room){
   if(!ev || !ev.type) return;
@@ -2377,8 +2348,8 @@ function enqueueCutin(ev, room){
     return;
   }
   _cutinQueue.push({ ev, room });
-  // v9-FIX: キューを大幅に拡張。連続バースト/不足/補充が一度に来ても全演出を再生
-  if(_cutinQueue.length > CUTIN_QUEUE_MAX) _cutinQueue.splice(0, _cutinQueue.length - CUTIN_QUEUE_MAX);
+  // v8: キューが長すぎる場合（再接続時など）古いイベントを破棄
+  if(_cutinQueue.length > 8) _cutinQueue.splice(0, _cutinQueue.length - 8);
   if(!_cutinPlaying) _processCutinQueue();
 }
 
@@ -2395,17 +2366,13 @@ function _processCutinQueue(){
 function triggerCutin(icon, text, variant){
   const ov = document.getElementById('overlay');
   if(!ov) return;
-  // v9-FIX: 前のカットインの hide タイマーが残っていれば必ず先にクリア。
-  // これでテキスト一致による誤クリア・新カットイン即消しを防ぐ。
-  if(_cutinHideTimer){ clearTimeout(_cutinHideTimer); _cutinHideTimer = null; }
-  const mySerial = ++_cutinSerial;
-  ov.dataset.serial = String(mySerial);
+  // v8: 既存表示を強制クリアしてから新カットインを出す（重なり防止）
   ov.classList.remove('hidden');
   ov.innerHTML = `<div class="cutin">${icon}</div><div class="cutin-text ${variant||''}">${escapeHtml(text)}</div>`;
-  // 表示時間後に hide。ただし「自分が表示したカットインが今もまだ最新」の場合のみ消す。
-  _cutinHideTimer = setTimeout(()=>{
-    _cutinHideTimer = null;
-    if(ov.dataset.serial === String(mySerial)){
+  // 表示時間（次の処理間隔より短くして必ずクリアされるようにする）
+  setTimeout(()=>{
+    // 次のカットインがすでに出ている場合は触らない
+    if(ov.innerHTML.includes(escapeHtml(text))){
       ov.classList.add('hidden');
       ov.innerHTML = '';
     }
@@ -2482,6 +2449,5 @@ window.__internal = {
 console.log('[MC v8] Loaded. Waiting for Firebase...');
 </script>
 
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
