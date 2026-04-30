@@ -372,6 +372,39 @@ function arr(x){
   }
   return [];
 }
+
+/* 【v9 BUGFIX】 金庫配列をスパース保持で正規化する。
+ * Firebaseは [null,null,X] を {2:X} にシリアライズし、arr()はそれをコンパクトして [X] にするため、
+ * レンダリングインデックス 0 と実インデックス 2 がずれる → 「金庫なし」エラー。
+ * safesArr() は必ず長さ SAFE_SLOTS の配列を返し、空スロットは null で埋める。
+ */
+function safesArr(safesRaw){
+  const result = new Array(SAFE_SLOTS).fill(null);
+  if(!safesRaw) return result;
+  if(Array.isArray(safesRaw)){
+    for(let i=0; i<safesRaw.length && i<SAFE_SLOTS; i++){
+      result[i] = safesRaw[i] || null;
+    }
+    return result;
+  }
+  if(typeof safesRaw === 'object'){
+    for(const k in safesRaw){
+      if(/^\d+$/.test(k)){
+        const idx = +k;
+        if(idx >= 0 && idx < SAFE_SLOTS){
+          result[idx] = safesRaw[k] || null;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+/* 【v9 BUGFIX】 st.safes を常に長さ SAFE_SLOTS の配列に正規化して代入し直す */
+function normalizeSafes(st){
+  st.safes = safesArr(st.safes);
+  return st.safes;
+}
 function obj(x){ return (x && typeof x==='object') ? x : {}; }
 
 const S = {
@@ -389,7 +422,9 @@ const S = {
   peekingCard: null,        // {safeIdx, cardIdx}
   pendingNoise: false,      // デュエルモード: ノイズ配置待ち
   swapMode: false,          // Q-V6-A: 場コードスワップ選択モード
-  swapPicks: []             // Q-V6-A: 選択中の2枚 [{safeIdx,cardIdx}, ...]
+  swapPicks: [],            // Q-V6-A: 選択中の2枚 [{safeIdx,cardIdx}, ...]
+  previewMode: false,       // 【v9】予告状モード - 金庫選択待ちとその後の通常配置フロー
+  previewSafe: -1           // 【v9】予告状を出す金庫のインデックス (-1=未選択)
 };
 localStorage.setItem('mc_token', S.token);
 
@@ -545,7 +580,8 @@ function drawToHand(st, seat){
 }
 
 function refillSafes(st){
-  st.safes = arr(st.safes);
+  // 【v9】スパースインデックス保持のため safesArr を使用
+  st.safes = safesArr(st.safes);
   st.safeDeck = arr(st.safeDeck);
   st.deck = arr(st.deck);
   // Q-V6-E: 山札枯渇時は「サドンデス」モード、金庫補充も停止
@@ -769,7 +805,8 @@ function checkMultiBurstBonus(st, seat){
 
 /* ==== 終了判定 ==== */
 function checkGameEnd(st, room){
-  const safes = arr(st.safes);
+  // 【v9】スパース保持のため safesArr を使用
+  const safes = safesArr(st.safes);
   const safeRemaining = safes.some(s => s !== null);
   const safeDeck = arr(st.safeDeck);
   if(safeDeck.length === 0 && !safeRemaining){
@@ -978,9 +1015,11 @@ function processAction(room, seat, action){
     const safeIdx = action.safeIdx;
     const usePreview = !!action.preview;
     if(cardIdx < 0 || cardIdx >= p.hand.length) throw new Error('カード不正');
-    if(safeIdx < 0 || safeIdx >= arr(st.safes).length) throw new Error('金庫不正');
+    // 【v9 BUGFIX】 st.safes を長さ SAFE_SLOTS の配列に正規化してインデックスずれを防ぐ
+    st.safes = safesArr(st.safes);
+    if(safeIdx < 0 || safeIdx >= SAFE_SLOTS) throw new Error('金庫不正 (idx=' + safeIdx + ')');
     const sf = st.safes[safeIdx];
-    if(!sf) throw new Error('金庫なし');
+    if(!sf) throw new Error('金庫なし (idx=' + safeIdx + ')');
     const meta = SAFE_META[sf.kind];
     sf.cards = arr(sf.cards);
     if(sf.cards.length >= meta.count) throw new Error('金庫満杯');
@@ -1005,7 +1044,7 @@ function processAction(room, seat, action){
     if(st.mode === 'duel'){
       // デュエル: 配置後はノイズ配置フェーズへ（金庫が残っていて山札もある場合）
       st.deck = arr(st.deck);
-      const stillHasSafe = arr(st.safes).some(s => s !== null);
+      const stillHasSafe = safesArr(st.safes).some(s => s !== null);
       if(st.deck.length > 0 && stillHasSafe){
         st.phase = 'choose_noise';
         log_(st, `👻 ${p.name} はノイズ配置 (山札から1枚を見ずに伏せる)`);
@@ -1059,8 +1098,9 @@ function processAction(room, seat, action){
     if(st.turnSeat !== seat) throw new Error('あなたの番ではありません');
     const a = action.a, b = action.b;
     if(!a || !b) throw new Error('2枚のカードを指定してください');
-    const safesArr = arr(st.safes);
-    const sa = safesArr[a.safeIdx], sb = safesArr[b.safeIdx];
+    // 【v9】スパース保持に変更
+    const safesNorm = safesArr(st.safes);
+    const sa = safesNorm[a.safeIdx], sb = safesNorm[b.safeIdx];
     if(!sa || !sb) throw new Error('金庫不正');
     const ca = arr(sa.cards), cb = arr(sb.cards);
     if(a.cardIdx < 0 || a.cardIdx >= ca.length) throw new Error('カードA不正');
@@ -1102,9 +1142,9 @@ function processAction(room, seat, action){
     if(st.mode !== 'duel') throw new Error('デュエルモード専用');
     if(st.phase !== 'choose_noise') throw new Error('ノイズ配置フェーズではない');
     const safeIdx = action.safeIdx;
-    // st.safes を正規化して検査、以降は st.safes[safeIdx] を直接参照
-    st.safes = arr(st.safes);
-    if(safeIdx < 0 || safeIdx >= st.safes.length) throw new Error('金庫不正');
+    // 【v9】 st.safes をスパース保持で正規化して検査、以降は st.safes[safeIdx] を直接参照
+    st.safes = safesArr(st.safes);
+    if(safeIdx < 0 || safeIdx >= SAFE_SLOTS) throw new Error('金庫不正 (idx=' + safeIdx + ')');
     const sf = st.safes[safeIdx];
     if(!sf) throw new Error('金庫なし');
     const meta = SAFE_META[sf.kind];
@@ -1141,9 +1181,10 @@ function processAction(room, seat, action){
     if(p.scoutedThisTurn) throw new Error('このターン既にスカウト済');
     const safeIdx = action.safeIdx;
     const cardIdx = action.cardIdx;
-    const safes = arr(st.safes);
-    if(safeIdx < 0 || safeIdx >= safes.length) throw new Error('金庫不正');
-    const sf = safes[safeIdx];
+    // 【v9】スパース保持に変更
+    st.safes = safesArr(st.safes);
+    if(safeIdx < 0 || safeIdx >= SAFE_SLOTS) throw new Error('金庫不正 (idx=' + safeIdx + ')');
+    const sf = st.safes[safeIdx];
     if(!sf) throw new Error('金庫なし');
     sf.cards = arr(sf.cards);
     if(cardIdx < 0 || cardIdx >= sf.cards.length) throw new Error('カード不正');
@@ -1560,7 +1601,8 @@ function renderSafes(r, st){
   const el = document.getElementById('safes');
   el.innerHTML = '';
   if(!st){ el.innerHTML = '<div class="muted">ゲーム未開始</div>'; return; }
-  const safes = arr(st.safes);
+  // 【v9 BUGFIX】スパース保持で並べるため safesArr を使用、idx は実際の st.safes インデックスと一致する
+  const safes = safesArr(st.safes);
   const order = arr(r.order).filter(s=>s!=='_');
   safes.forEach((sf, idx) => {
     const div = document.createElement('div');
@@ -1589,6 +1631,18 @@ function renderSafes(r, st){
       if(S.scoutMode) return;
       // Q-V6-A: コードスワップ選択モード中はカードタップで選択 (safeクリックは無効)
       if(S.swapMode){ toast('💱 入れ替えるカードをタップしてください'); return; }
+      // 【v9】予告状モード: 金庫選択フェーズ
+      if(S.previewMode && S.previewSafe < 0){
+        if(cards.length >= meta.count){ toast('⚠️ 満杯の金庫には予告状を出せません'); return; }
+        if(sf.previewBy && sf.previewBy !== S.seat){ toast('⚠️ この金庫は既に他者が予告状宣言済'); return; }
+        S.previewSafe = idx;
+        S.preview = true;
+        S.selSafe = idx;  // 予告状金庫に配置他ち受ける
+        S.previewMode = false;  // 選択完了、手札選択フェーズへ
+        toast(`🎯 予告状: ${meta.label}金庫${idx+1} に宣言 → 手札を選んで配置してください`);
+        renderAll();
+        return;
+      }
       // デュエル: ノイズ配置モード
       if(st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat){
         if(cards.length >= meta.count){ toast('⚠️ 満杯'); return; }
@@ -1597,9 +1651,25 @@ function renderSafes(r, st){
         }
         return;
       }
+      // 【v9】予告状金庫を選択した後は「その金庫以外」タップも許容（予告状キャンセル）
+      if(S.previewSafe >= 0 && idx !== S.previewSafe){
+        if(confirm('予告状金庫を変更しますか？')){
+          if(sf.previewBy && sf.previewBy !== S.seat){ toast('⚠️ この金庫は他者が宣言済'); return; }
+          if(cards.length >= meta.count){ toast('⚠️ 満杯'); return; }
+          S.previewSafe = idx;
+          S.selSafe = idx;
+          renderAll();
+        }
+        return;
+      }
       if(S.selCard >= 0){
-        doPlace(S.selCard, idx, S.preview);
-        S.selCard = -1; S.selSafe = -1; S.preview = false; renderAll();
+        const targetSafe = (S.previewSafe >= 0) ? S.previewSafe : idx;
+        const usePrev = (S.previewSafe >= 0 && targetSafe === S.previewSafe);
+        if(usePrev && idx !== S.previewSafe){
+          toast('⚠️ 予告状を出した金庫に配置してください'); return;
+        }
+        doPlace(S.selCard, idx, usePrev);
+        S.selCard = -1; S.selSafe = -1; S.preview = false; S.previewMode = false; S.previewSafe = -1; renderAll();
       } else {
         S.selSafe = (S.selSafe === idx ? -1 : idx);
         renderAll();
@@ -1849,10 +1919,20 @@ function renderActPanel(r, st){
   let infoHTML = '';
   if(S.scoutMode){
     infoHTML = '🔭 <b class="warn">スカウトモード中</b> - 場の伏せカードをタップして覗き見';
+  } else if(S.previewMode && S.previewSafe < 0){
+    // 【v9】予告状モード: 金庫選択待ち
+    infoHTML = '🎯 <b class="warn">予告状モード</b> - 宣言する金庫をタップしてください';
+  } else if(S.previewSafe >= 0){
+    // 【v9】予告状金庫済 → 手札選択待ち
+    if(S.selCard >= 0){
+      const card = arr(p.hand)[S.selCard];
+      infoHTML = `🎯 <b class="warn">金庫${S.previewSafe+1}に予告状宣言中</b> / 🃏 選択: <b style="font-size:20px;color:var(--accent)">${card?.n||'?'}</b> → 「✅予告状として金庫${S.previewSafe+1}に配置」ボタンを押す`;
+    } else {
+      infoHTML = `🎯 <b class="warn">金庫${S.previewSafe+1}に予告状宣言中</b> - 手札を選んで配置してください`;
+    }
   } else if(S.selCard >= 0){
     const card = arr(p.hand)[S.selCard];
     infoHTML = `🃏 選択中: <b style="font-size:20px;color:var(--accent)">${card?.n||'?'}</b> → 配置先の金庫をタップ`;
-    if(S.preview) infoHTML += ' / 🎯<b class="warn">予告状宣言ON</b>';
   } else {
     infoHTML = '📋 手札を選ぶか、アクションボタンを押してください';
     if(p.scoutedThisTurn) infoHTML += ' <span class="muted">(🔭スカウト済)</span>';
@@ -1867,11 +1947,26 @@ function renderActPanel(r, st){
   scoutBtn.onclick = () => { S.scoutMode = !S.scoutMode; S.selCard = -1; renderAll(); };
   btns.appendChild(scoutBtn);
 
+  // 【v9】予告状ボタン → クリックで予告状モードON、金庫選択待ちに遷移
   const previewBtn = document.createElement('button');
-  previewBtn.textContent = `🎯予告状 (残${p.previewLeft||0}) ${S.preview?'ON':'OFF'}`;
-  previewBtn.disabled = (p.previewLeft||0) <= 0;
-  if(S.preview) previewBtn.className = 'primary';
-  previewBtn.onclick = () => { S.preview = !S.preview; renderAll(); };
+  let prevLabel;
+  if(S.previewSafe >= 0) prevLabel = `🎯金庫${S.previewSafe+1}予告状中 (キャンセル)`;
+  else if(S.previewMode) prevLabel = '🎯金庫選択中... (キャンセル)';
+  else prevLabel = `🎯予告状 (残${p.previewLeft||0})`;
+  previewBtn.textContent = prevLabel;
+  previewBtn.disabled = (p.previewLeft||0) <= 0 && !S.previewMode && S.previewSafe < 0;
+  if(S.previewMode || S.previewSafe >= 0) previewBtn.className = 'primary';
+  previewBtn.onclick = () => {
+    if(S.previewMode || S.previewSafe >= 0){
+      // キャンセル
+      S.previewMode = false; S.previewSafe = -1; S.preview = false;
+    } else {
+      // 予告状モードON → 金庫選択待ち
+      S.previewMode = true; S.previewSafe = -1; S.preview = false;
+      S.selCard = -1; S.scoutMode = false;
+    }
+    renderAll();
+  };
   btns.appendChild(previewBtn);
 
   const passBtn = document.createElement('button');
@@ -1880,16 +1975,26 @@ function renderActPanel(r, st){
   passBtn.onclick = async () => {
     if(arr(p.hand).length > 0 && !confirm('手札があるけどパスしますか？')) return;
     await doPass();
-    S.selCard = -1; S.selSafe = -1; S.preview = false; S.scoutMode = false;
+    S.selCard = -1; S.selSafe = -1; S.preview = false; S.previewMode = false; S.previewSafe = -1; S.scoutMode = false;
   };
   btns.appendChild(passBtn);
 
-  if(S.selCard >= 0 && S.selSafe >= 0){
+  // 【v9】予告状金庫済 + 手札選択済 → 「予告状として配置」専用ボタン
+  if(S.previewSafe >= 0 && S.selCard >= 0){
     const placeBtn = document.createElement('button');
     placeBtn.className = 'success';
-    placeBtn.textContent = `✅ 金庫${S.selSafe+1}に配置${S.preview?'(🎯宣言)':''}`;
+    placeBtn.textContent = `✅ 予告状として金庫${S.previewSafe+1}に配置`;
     placeBtn.onclick = async () => {
-      await doPlace(S.selCard, S.selSafe, S.preview);
+      await doPlace(S.selCard, S.previewSafe, true);
+      S.selCard = -1; S.selSafe = -1; S.preview = false; S.previewMode = false; S.previewSafe = -1; S.scoutMode = false;
+    };
+    btns.appendChild(placeBtn);
+  } else if(S.selCard >= 0 && S.selSafe >= 0){
+    const placeBtn = document.createElement('button');
+    placeBtn.className = 'success';
+    placeBtn.textContent = `✅ 金庫${S.selSafe+1}に配置`;
+    placeBtn.onclick = async () => {
+      await doPlace(S.selCard, S.selSafe, false);
       S.selCard = -1; S.selSafe = -1; S.preview = false; S.scoutMode = false;
     };
     btns.appendChild(placeBtn);
@@ -2327,9 +2432,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
 });
 
 // 内部テスト用エクスポート
-window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, NOISE_PASS_COST_REPEAT, MAX_SPECTATORS, LAST_ROULETTE_TRIGGER, LAST_ROULETTE_MULTIPLIER, LAST_ROULETTE_FIRST_PROB, LAST_ROULETTE_REPEAT_PROB, refillSafes };
+window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, safesArr, GHOST_OWNER, SAFE_META, SAFE_SLOTS, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, NOISE_PASS_COST_REPEAT, MAX_SPECTATORS, LAST_ROULETTE_TRIGGER, LAST_ROULETTE_MULTIPLIER, LAST_ROULETTE_FIRST_PROB, LAST_ROULETTE_REPEAT_PROB, refillSafes };
 
-console.log('[MC v8] Loaded. Waiting for Firebase...');
+console.log('[MC v9] Loaded. Waiting for Firebase...');
 </script>
 
 </body>
