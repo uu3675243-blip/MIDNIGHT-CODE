@@ -1441,13 +1441,16 @@ function subscribeRoom(){
 
 function handleEvents(room){
   const st = room.state;
-  // v11-FIX: state が null の場合（reset 直後など）はクライアント側の
-  // seq カウンタもリセットして、次のゲームで「初回ロード扱い」になるよう備える。
+  // v12-FIX: state が null の場合（reset 直後など）は seq カウンタを 0 に戻すだけ。
+  // 重要: lastShownEventInit は true のまま保持して、新ゲームの seq=1 が
+  // 「初回ロードガード」に引っかからずに正常に再生されるようにする。
+  // (lastShownEventInit を false に戻すと、ホストが state=null→state=新(events=[])を
+  //  確実に経由するため、次ゲームの最初のイベント (seq=1) が初回ロード扱いされて
+  //  スキップされるバグが発生したため)
   if(!st){
-    if(S.lastShownEventSeq !== 0 || S.lastShownEventInit !== false){
+    if((S.lastShownEventSeq || 0) !== 0){
       S.lastShownEventSeq = 0;
-      S.lastShownEventInit = false;
-      // 再生中のキューも捨てる（前ゲームの演出を持ち越さない）
+      // 進行中のカットインキューも捨てて、前ゲームの演出を持ち越さない
       try {
         _cutinQueue.length = 0;
         _cutinPlaying = false;
@@ -1467,16 +1470,16 @@ function handleEvents(room){
 
   const currentMaxSeq = events.length > 0 ? (events[events.length-1].seq || 0) : 0;
 
-  // v11-FIX: 新ゲーム検出 — 現在の最大 seq が記録済みの lastShownEventSeq より
-  // 小さい場合は別ゲームが始まった証拠（reset で eventSeqCounter が 1 から再採番される）。
-  // クライアント側カウンタを 0 に戻し、初回ロード扱いで再起動する。
+  // v12-FIX: 新ゲーム検出 — 現在の最大 seq が記録済みの lastShownEventSeq より小さい = 
+  // reset で eventSeqCounter が 1 から再採番された証拠。 lastShownEventSeq を 0 に戻すだけ。
+  // lastShownEventInit は true のまま保持 → 以下の初回ロードガードをスキップして
+  // seq=1 から正しくカットインされる。
   if(currentMaxSeq < (S.lastShownEventSeq || 0)){
     S.lastShownEventSeq = 0;
-    S.lastShownEventInit = false;
   }
 
-  // v8: 初回ロード（lastShownEventSeq===0 の場合）は既存イベントを
-  // 再生せず、現在の最大 seq を記録するだけ。これで再接続時に
+  // v8: 初回ロード（ページリロード直後のみ lastShownEventInit !== true）は
+  // 既存イベントを再生せず、現在の最大 seq を記録するだけ。これで再接続時に
   // 過去全イベントが一気に流れる問題を回避。
   if(S.lastShownEventSeq === 0 && S.lastShownEventInit !== true){
     S.lastShownEventSeq = currentMaxSeq;
@@ -1488,8 +1491,7 @@ function handleEvents(room){
   const newEvs = events.filter(e => (e.seq||0) > lastSeq);
   if(newEvs.length === 0) return;
 
-  // v11-FIX: enqueueCutin を先に呼んでから seq を更新する。
-  // (旧実装は逆順で、enqueue 中に例外が起きると seq だけ進んで取りこぼす可能性があった)
+  // v12-FIX: enqueueCutin を先に呼んでから seq を更新する（例外時の取りこぼし防止）
   newEvs.forEach((ev) => {
     try { enqueueCutin(ev, room); } catch(e){ console.warn('enqueueCutin err', e); }
   });
@@ -1549,12 +1551,14 @@ async function startGame(){
 }
 async function resetGame(){ 
   if(!confirm('ゲームをリセットしてロビーに戻りますか？（全員が同じ部屋で再プレイ可能）')) return;
-  // v11-FIX: 演出関連のクライアント状態を明示的にクリアしてから reset を送る。
-  // これにより handleEvents のフォールバック検出に依存せず、確実に次ゲームの
-  // seq=1 から正しくカットイン再生される。
+  // v12-FIX: 演出関連のクライアント状態をクリアしてから reset を送る。
+  // 重要: lastShownEventInit は true のまま保持すること。false に戻すと
+  // ホストが「state=null → state=新(events=[])」を確実に経由するため、
+  // 次ゲームの最初のイベント (seq=1) が「初回ロード」と見なされてスキップされる。
+  // （これが「プレイヤー1 (ホスト) のみカットインが出ない」バグの根本原因だった）
   try {
     S.lastShownEventSeq = 0;
-    S.lastShownEventInit = false;
+    // S.lastShownEventInit は意図的に触らない (true のままにしておく)
     _cutinQueue.length = 0;
     _cutinPlaying = false;
     if(_cutinTimer){ clearTimeout(_cutinTimer); _cutinTimer = null; }
