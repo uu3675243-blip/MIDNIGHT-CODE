@@ -394,6 +394,7 @@ const S = {
   scoutMode: false,
   lastShownEvent: 0,
   lastShownEventSeq: 0,
+  lastShownEventInit: false,
   swapMode: false,
   swapPick: [],
   peekingCard: null,        // {safeIdx, cardIdx}
@@ -529,14 +530,18 @@ function log_(st, text, opts){
 
 function pushEvent(st, ev){
   st.events = arr(st.events);
-  // v7: 同一ms内連続イベントの衝突を防ぐためseqと「ms内オフセット」を保証
-  const now = Date.now();
-  const last = st.events.length > 0 ? st.events[st.events.length - 1] : null;
-  // 直前イベントの t が同じかそれ以上なら +1ms ずつインクリメント（順序保証）
-  ev.t = (last && last.t >= now) ? last.t + 1 : now;
-  ev.seq = (st.eventSeqCounter = (st.eventSeqCounter || 0) + 1);
+  // v8: tは実時刻を保持（ログ表示の整合性）。順序保証はseqに一本化。
+  ev.t = Date.now();
+  // seqは単調増加・重複なしを厳守。トランザクションが再実行されても
+  // 既存最大値より大きい値を必ず採用する。
+  let maxSeq = st.eventSeqCounter || 0;
+  for(const e of st.events){ if((e.seq||0) > maxSeq) maxSeq = e.seq; }
+  ev.seq = maxSeq + 1;
+  st.eventSeqCounter = ev.seq;
   st.events.push(ev);
-  if(st.events.length > 50) st.events.splice(0, st.events.length - 50);
+  // v8: バッファ拡張 50→100。トリミングしてもseq値はそのまま残るため
+  // 順序判定は壊れない。
+  if(st.events.length > 100) st.events.splice(0, st.events.length - 100);
 }
 
 function nextSeat(st, room){
@@ -1376,7 +1381,8 @@ function subscribeRoom(){
     if(room.state){
       room.state.safes = arr(room.state.safes);
       room.state.logs = arr(room.state.logs);
-      room.state.events = arr(room.state.events);
+      // v8: eventsを必ずseq昇順に整列（Firebase配列復元で順序が崩れた場合の保険）
+      room.state.events = arr(room.state.events).slice().sort((a,b)=>(a.seq||0)-(b.seq||0));
       room.state.deck = arr(room.state.deck);
       room.state.safeDeck = arr(room.state.safeDeck);
       room.state.discard = arr(room.state.discard);
@@ -1405,14 +1411,31 @@ function subscribeRoom(){
 function handleEvents(room){
   const st = room.state;
   if(!st || !arr(st.events).length) return;
-  const events = arr(st.events);
-  // v7: seq ベースのフィルタリング（t の ms 衝突に強い）
+  let events = arr(st.events);
+  // v8: 必ず seq 昇順にソートしてから処理（Firebase 配列再構築でキー順が
+  // 崩れた場合の保険）
+  events = events.slice().sort((a, b) => (a.seq||0) - (b.seq||0));
+
+  // v8: 初回ロード（lastShownEventSeq===0 の場合）は既存イベントを
+  // 再生せず、現在の最大 seq を記録するだけ。これで再接続時に
+  // 過去全イベントが一気に流れる問題を回避。
+  if(S.lastShownEventSeq === 0 && S.lastShownEventInit !== true){
+    S.lastShownEventSeq = events.length > 0 ? Math.max(...events.map(e => e.seq||0)) : 0;
+    S.lastShownEventInit = true;
+    return;
+  }
+
   const lastSeq = S.lastShownEventSeq || 0;
   const newEvs = events.filter(e => (e.seq||0) > lastSeq);
   if(newEvs.length === 0) return;
-  S.lastShownEventSeq = Math.max(lastSeq, ...events.map(e => e.seq||0));
-  // v7-FIX: 全ての新規イベントを順番に再生（カットインがキューイングされる）
-  newEvs.forEach((ev, i) => {
+
+  // v8: lastShownEventSeq は新規イベント群の中の最大値で更新（処理した
+  // ものだけを記録）。これにより buffer trim で古いイベントが消えても
+  // 順序が維持される。
+  S.lastShownEventSeq = newEvs[newEvs.length - 1].seq || lastSeq;
+
+  // 全ての新規イベントを順番に再生（カットインキュー）
+  newEvs.forEach((ev) => {
     enqueueCutin(ev, room);
   });
 }
@@ -1434,6 +1457,9 @@ async function leaveRoom(){
   }
   if(unsub) unsub();
   S.roomId = ''; S.seat = ''; S.room = null; S.isSpectator = false;
+  // v8: 次の部屋入場時のために初期化フラグをリセット
+  S.lastShownEventSeq = 0;
+  S.lastShownEventInit = false;
   localStorage.removeItem('mc_lastRoom');
   document.getElementById('lobby').classList.remove('hidden');
   document.getElementById('game').classList.add('hidden');
@@ -2283,7 +2309,7 @@ function showEvent(ev, room){
     triggerCutin('🌟👻', `奇跡の解錠！ ${ev.byName||'?'} に +${ALL_GHOST_BONUS}chipボーナス`, 'success');
     playSound('unlock');
   } else if(ev.type === 'noise_pass'){
-    triggerCutin('💨', `${ev.byName||'?'} がノイズ配置をパス (-${ev.cost||1}chip)`, '');
+    // v8: 軽量SE扱い（カットインなし、SEのみ）
     playSound('warn');
   } else if(ev.type === 'sudden_death'){
     triggerCutin('⚡⚡⚡', 'サドンデス突入！ ゴースト供給・金庫補充停止', 'sudden');
@@ -2303,28 +2329,54 @@ function showEvent(ev, room){
   }
 }
 
-/* v7: カットインキュー — 連続イベントを順番に再生（重複・スキップ問題の解消） */
+/* v8: カットインキュー — 連続イベントを順番に再生
+ * 重要: place / scout_self などの「軽量SE専用」イベントはオーバーレイ表示せず
+ * 即時 SE のみ再生する（メインの success/burst/near 演出を妨げない）
+ */
 const _cutinQueue = [];
 let _cutinPlaying = false;
+let _cutinTimer = null;
+const LIGHT_EVENT_TYPES = new Set(['place', 'scout_self', 'noise_pass']);
+const HEAVY_DURATION_MS = 1500; // メイン演出の表示時間（短めにして取りこぼし防止）
+const HEAVY_GAP_MS = 1700;       // メイン演出間の最小間隔
+
 function enqueueCutin(ev, room){
+  if(!ev || !ev.type) return;
+  // v8: 軽量イベントは即時 SE のみ。キューを使わずスキップ。
+  if(LIGHT_EVENT_TYPES.has(ev.type)){
+    try { showEvent(ev, room); } catch(e){ console.warn('showEvent light err', e); }
+    return;
+  }
   _cutinQueue.push({ ev, room });
+  // v8: キューが長すぎる場合（再接続時など）古いイベントを破棄
+  if(_cutinQueue.length > 8) _cutinQueue.splice(0, _cutinQueue.length - 8);
   if(!_cutinPlaying) _processCutinQueue();
 }
+
 function _processCutinQueue(){
   if(_cutinQueue.length === 0){ _cutinPlaying = false; return; }
   _cutinPlaying = true;
   const { ev, room } = _cutinQueue.shift();
-  showEvent(ev, room);
-  // 1.6秒で次へ（連続イベントを観客が認識できる速度）
-  setTimeout(_processCutinQueue, 1600);
+  try { showEvent(ev, room); } catch(e){ console.warn('showEvent err', e); }
+  // 次のイベントへ（必ずsetTimeoutで予約）
+  if(_cutinTimer) clearTimeout(_cutinTimer);
+  _cutinTimer = setTimeout(_processCutinQueue, HEAVY_GAP_MS);
 }
+
 function triggerCutin(icon, text, variant){
   const ov = document.getElementById('overlay');
   if(!ov) return;
+  // v8: 既存表示を強制クリアしてから新カットインを出す（重なり防止）
   ov.classList.remove('hidden');
   ov.innerHTML = `<div class="cutin">${icon}</div><div class="cutin-text ${variant||''}">${escapeHtml(text)}</div>`;
-  // v7: キューに合わせて表示時間を1.4秒に短縮（次イベントを取りこぼさない）
-  setTimeout(()=>{ ov.classList.add('hidden'); ov.innerHTML = ''; }, 1400);
+  // 表示時間（次の処理間隔より短くして必ずクリアされるようにする）
+  setTimeout(()=>{
+    // 次のカットインがすでに出ている場合は触らない
+    if(ov.innerHTML.includes(escapeHtml(text))){
+      ov.classList.add('hidden');
+      ov.innerHTML = '';
+    }
+  }, HEAVY_DURATION_MS);
 }
 
 function toast(msg){
@@ -2394,7 +2446,7 @@ window.__internal = {
   LAST_ROULETTE_TRIGGER, LAST_ROULETTE_MULT, checkSuddenDeath
 };
 
-console.log('[MC v7] Loaded. Waiting for Firebase...');
+console.log('[MC v8] Loaded. Waiting for Firebase...');
 </script>
 
 </body>
