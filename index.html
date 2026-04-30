@@ -781,8 +781,12 @@ function judgeSafe(st, safeIdx, room){
       log_(st, `💥 🎯予告状失敗: ${st.players[previewBy].name} ${previewFailAmt}chip${sf.roulette?' 🎰×2':''}`, { kind:'burst' });
     }
   } else { // FAIL
-    pushEvent(st, { type:'fail', safeKind:sf.kind, sum, target });
-    log_(st, `❌ 不足 (合計${sum} ≤ 目標-2) - 全員報酬なし、金庫破棄`);
+    // v9-FIX: failにも最後に置いた人(culprit)情報を含めて全員に演出
+    const failCulprit = lastAnyPlacer;
+    const isGhostFailCulprit = failCulprit === GHOST_OWNER;
+    const failCulpritName = isGhostFailCulprit ? '👻ゴースト' : (st.players[failCulprit]?.name || '?');
+    pushEvent(st, { type:'fail', safeKind:sf.kind, sum, target, culprit: isGhostFailCulprit ? '' : failCulprit, culpritName: failCulpritName });
+    log_(st, `❌ 不足 (合計${sum} ≤ 目標-2) - 全員報酬なし、金庫破棄`, { kind:'burst' });
   }
 
   st.discard = arr(st.discard);
@@ -2294,8 +2298,19 @@ function showEvent(ev, room){
       }, 500);
     }
   } else if(ev.type === 'fail'){
-    triggerCutin('❌', '不足 - 金庫破棄', '');
+    // v9-FIX: 全プレイヤーに演出を表示。犯人(最後に置いた人)情報も含める。
+    const culpritTxt = ev.culpritName ? ` 最後: ${ev.culpritName}` : '';
+    triggerCutin('❌', `不足 - 金庫破棄${culpritTxt}`, 'culprit');
     playSound('warn');
+    if(ev.culprit){
+      setTimeout(()=>{
+        const el = document.getElementById('player_' + ev.culprit);
+        if(el){
+          el.classList.add('culprit-flash');
+          setTimeout(()=>el.classList.remove('culprit-flash'), 3000);
+        }
+      }, 300);
+    }
   } else if(ev.type === 'clumsy'){
     triggerCutin('🏆💥', `伝説のドジ怪盗発動！ by ${ev.byName||'?'} → 全員${ev.avg||0}chip`, 'culprit');
     playSound('burst');
@@ -2336,9 +2351,12 @@ function showEvent(ev, room){
 const _cutinQueue = [];
 let _cutinPlaying = false;
 let _cutinTimer = null;
+let _cutinHideTimer = null;     // v9-FIX: triggerCutin の hide タイマーID
+let _cutinSerial = 0;            // v9-FIX: カットインのシリアルID
 const LIGHT_EVENT_TYPES = new Set(['place', 'scout_self', 'noise_pass']);
-const HEAVY_DURATION_MS = 1500; // メイン演出の表示時間（短めにして取りこぼし防止）
-const HEAVY_GAP_MS = 1700;       // メイン演出間の最小間隔
+const HEAVY_DURATION_MS = 1100; // v9-FIX: 1500→1100 (連続演出の取りこぼし防止)
+const HEAVY_GAP_MS = 1250;       // v9-FIX: 1700→1250 (連続演出の取りこぼし防止)
+const CUTIN_QUEUE_MAX = 24;     // v9-FIX: 8→24 (デュエルで連続バースト/不足が来ても破棄しない)
 
 function enqueueCutin(ev, room){
   if(!ev || !ev.type) return;
@@ -2348,8 +2366,8 @@ function enqueueCutin(ev, room){
     return;
   }
   _cutinQueue.push({ ev, room });
-  // v8: キューが長すぎる場合（再接続時など）古いイベントを破棄
-  if(_cutinQueue.length > 8) _cutinQueue.splice(0, _cutinQueue.length - 8);
+  // v9-FIX: キューを大幅に拡張。連続バースト/不足/補充が一度に来ても全演出を再生
+  if(_cutinQueue.length > CUTIN_QUEUE_MAX) _cutinQueue.splice(0, _cutinQueue.length - CUTIN_QUEUE_MAX);
   if(!_cutinPlaying) _processCutinQueue();
 }
 
@@ -2366,13 +2384,17 @@ function _processCutinQueue(){
 function triggerCutin(icon, text, variant){
   const ov = document.getElementById('overlay');
   if(!ov) return;
-  // v8: 既存表示を強制クリアしてから新カットインを出す（重なり防止）
+  // v9-FIX: 前のカットインの hide タイマーが残っていれば必ず先にクリア。
+  // これでテキスト一致による誤クリア・新カットイン即消しを防ぐ。
+  if(_cutinHideTimer){ clearTimeout(_cutinHideTimer); _cutinHideTimer = null; }
+  const mySerial = ++_cutinSerial;
+  ov.dataset.serial = String(mySerial);
   ov.classList.remove('hidden');
   ov.innerHTML = `<div class="cutin">${icon}</div><div class="cutin-text ${variant||''}">${escapeHtml(text)}</div>`;
-  // 表示時間（次の処理間隔より短くして必ずクリアされるようにする）
-  setTimeout(()=>{
-    // 次のカットインがすでに出ている場合は触らない
-    if(ov.innerHTML.includes(escapeHtml(text))){
+  // 表示時間後に hide。ただし「自分が表示したカットインが今もまだ最新」の場合のみ消す。
+  _cutinHideTimer = setTimeout(()=>{
+    _cutinHideTimer = null;
+    if(ov.dataset.serial === String(mySerial)){
       ov.classList.add('hidden');
       ov.innerHTML = '';
     }
@@ -2449,5 +2471,6 @@ window.__internal = {
 console.log('[MC v8] Loaded. Waiting for Firebase...');
 </script>
 
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
