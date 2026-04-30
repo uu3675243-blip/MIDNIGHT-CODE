@@ -91,6 +91,21 @@ label{color:var(--muted);font-size:13px}
 @keyframes cutinText{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes cutinShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
 
+/* Q-V6-A: コードスワップ選択モード */
+.card.swap-pickable{outline:3px dashed var(--accent);cursor:pointer;animation:swapPulse 1.4s infinite}
+.card.swap-picked{outline:4px solid var(--accent2);box-shadow:0 0 22px var(--accent2);transform:scale(1.08)}
+@keyframes swapPulse{0%,100%{box-shadow:0 0 6px var(--accent)}50%{box-shadow:0 0 18px var(--accent)}}
+
+/* Q-V6-B: コードスワップ 移動アニメーション */
+.card.swap-anim{animation:swapSlide .9s ease-in-out;z-index:300;position:relative}
+@keyframes swapSlide{
+  0%{transform:translate(0,0) scale(1)}
+  20%{transform:translateY(-50px) scale(1.15);box-shadow:0 12px 30px rgba(242,201,76,.7)}
+  50%{transform:translateY(-50px) translateX(var(--swap-dx,0)) scale(1.15);box-shadow:0 14px 36px rgba(235,87,87,.8)}
+  80%{transform:translate(var(--swap-dx,0),0) scale(1.1)}
+  100%{transform:translate(0,0) scale(1)}
+}
+
 /* ログ */
 .log{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;max-height:260px;overflow-y:auto;font-size:13px;font-family:monospace}
 .log .entry{padding:3px 4px;border-bottom:1px solid rgba(255,255,255,.04);line-height:1.4}
@@ -332,6 +347,8 @@ const NOISE_PASS_COST = 1;           // Q7: ノイズ配置パスのチップ代
 const NOISE_PASS_COST_REPEAT = 2;    // Q-C: 同じプレイヤーの2回目以降ノイズパスは2chip
 const LAST_ROULETTE_TRIGGER = 5;     // Q-F: 山札残り5枚でラスト・ルーレット発動
 const LAST_ROULETTE_MULTIPLIER = 2;  // Q-F: 報酬・ペナルティ倍率
+const LAST_ROULETTE_FIRST_PROB = 1.0;  // Q-V6-C: 初回100%
+const LAST_ROULETTE_REPEAT_PROB = 0.3; // Q-V6-C: 以降30%
 
 const SAFE_META = {
   S: { label:'小', count:3, reward:3, burst:-2 },
@@ -370,7 +387,9 @@ const S = {
   scoutMode: false,
   lastShownEvent: 0,
   peekingCard: null,        // {safeIdx, cardIdx}
-  pendingNoise: false       // デュエルモード: ノイズ配置待ち
+  pendingNoise: false,      // デュエルモード: ノイズ配置待ち
+  swapMode: false,          // Q-V6-A: 場コードスワップ選択モード
+  swapPicks: []             // Q-V6-A: 選択中の2枚 [{safeIdx,cardIdx}, ...]
 };
 localStorage.setItem('mc_token', S.token);
 
@@ -527,6 +546,15 @@ function refillSafes(st){
   st.safes = arr(st.safes);
   st.safeDeck = arr(st.safeDeck);
   st.deck = arr(st.deck);
+  // Q-V6-E: 山札枯渇時は「サドンデス」モード、金庫補充も停止
+  if(arr(st.deck).length === 0){
+    if(!st.suddenDeath){
+      st.suddenDeath = true;
+      pushEvent(st, { type:'sudden_death' });
+      log_(st, `⚡✨ 【最終局面突入】 山札枯渇 → 金庫補充・ゴースト追加停止 (既存金庫を解錠 or 爆発させて決着)`, { kind:'burst' });
+    }
+    return; // Q-V6-E: 補充しない
+  }
   for(let i=0;i<st.safes.length;i++){
     if(!st.safes[i] && st.safeDeck.length > 0){
       const sf = st.safeDeck.pop();
@@ -541,18 +569,23 @@ function refillSafes(st){
       } else {
         log_(st, `🔐 金庫${i+1} 補充: ${SAFE_META[sf.kind].label}金庫 (目標=${sf.target})`);
       }
-      // Q-F: ラスト・ルーレット判定 (パーティモード、山札残り5枚以下)
-      if(st.mode === 'party' && arr(st.deck).length <= LAST_ROULETTE_TRIGGER && Math.random() < 0.5){
-        newSafe.multiplier = LAST_ROULETTE_MULTIPLIER;
-        log_(st, `🎰✨ ラスト・ルーレット発動！ 金庫${i+1} は倍率ドン (報酬/ペナルティが${LAST_ROULETTE_MULTIPLIER}倍)`, { kind:'success' });
-        pushEvent(st, { type:'last_roulette', safeIdx:i, multiplier:LAST_ROULETTE_MULTIPLIER });
+      // Q-F + Q-V6-C: ラスト・ルーレット判定（パーティ限定、山札残り5枚以下、初回100%/以降30%）
+      if(st.mode === 'party' && arr(st.deck).length <= LAST_ROULETTE_TRIGGER){
+        const prob = st.lastRouletteFired ? LAST_ROULETTE_REPEAT_PROB : LAST_ROULETTE_FIRST_PROB;
+        if(Math.random() < prob){
+          newSafe.multiplier = LAST_ROULETTE_MULTIPLIER;
+          const isFirst = !st.lastRouletteFired;
+          st.lastRouletteFired = true;
+          log_(st, `🎰✨ ラスト・ルーレット発動！ 金庫${i+1} は倍率ドン（報酬/ペナルティが${LAST_ROULETTE_MULTIPLIER}倍）${isFirst?' 【初回確定発動】':' 【抑えだるぼる設定】'}`, { kind:'success' });
+          pushEvent(st, { type:'last_roulette', safeIdx:i, multiplier:LAST_ROULETTE_MULTIPLIER, isFirst });
+        }
       }
       st.safes[i] = newSafe;
     }
   }
 }
 
-/* ==== 判定 (v6: 最後に置いた人が犯人、おこぼれルール、Q-Fラストルーレット倍率対応) ==== */
+/* ==== 判定 (v7: カードごとに処理、Q-Fラストルーレット倍率対応) ==== */
 function judgeSafe(st, safeIdx, room){
   const sf = st.safes[safeIdx];
   const meta = SAFE_META[sf.kind];
@@ -560,11 +593,19 @@ function judgeSafe(st, safeIdx, room){
   sf.cards = arr(sf.cards);
   const sum = sf.cards.reduce((a,c)=>a+c.n, 0);
   const target = sf.target;
+  const isFull = sf.cards.length >= meta.count;
   let result;
-  if(sum === target) result = 'SUCCESS';
+  // 【v7バグ修正】 カードを置くたびに判定（ニアピンも早期トリガー）:
+  //   sum > target: BURST (超過時点で即座爆発)
+  //   sum === target: SUCCESS (一致時点で即座解錠)
+  //   sum === target-1: NEAR (ジャスト足りない時点で即座ニアピンロックイン) ★v7修正
+  //   isFull && sum < target-1: FAIL (満杯して不足)
+  //   それ以外: 未判定 (さらにカードを追加できる)
+  if(sum > target) result = 'BURST';
+  else if(sum === target) result = 'SUCCESS';
   else if(sum === target-1) result = 'NEAR';
-  else if(sum > target) result = 'BURST';
-  else result = 'FAIL';
+  else if(isFull) result = 'FAIL';
+  else { return false; }  // 未判定
 
   // 参加者（GHOST除く実プレイヤー）と合計値を集計
   const participants = {};
@@ -699,7 +740,7 @@ function judgeSafe(st, safeIdx, room){
     }
   } else { // FAIL
     pushEvent(st, { type:'fail', safeKind:sf.kind, sum, target });
-    log_(st, `❌ 不足 (合計${sum} ≤ 目標-2) - 全員報酬なし、金庫破棄`);
+    log_(st, `❌ 不足 (満杯したが合計${sum} < 目標${target}-1) - 全員報酬なし、金庫破棄`);
   }
 
   st.discard = arr(st.discard);
@@ -708,6 +749,7 @@ function judgeSafe(st, safeIdx, room){
   }
   st.safes[safeIdx] = null;
   log_(st, `━━━━━━━━━━━━━━━━━━━━━━`);
+  return true;
 }
 
 /* ==== Q1/Q2: 同時バースト（1ターン内に2金庫以上バースト）特典判定 ==== */
@@ -740,13 +782,19 @@ function checkGameEnd(st, room){
     endGame(st, room, 'deck_exhausted');
     return true;
   }
+  // Q-V6-E: サドンデス状態 - 山札枯渇中に金庫ゼロになったら終了
+  if(st.suddenDeath && !safeRemaining){
+    endGame(st, room, 'sudden_death_cleared');
+    return true;
+  }
   return false;
 }
 
 function endGame(st, room, reason){
   st.status = 'ended';
   st.ended = true;
-  log_(st, `🏁 ゲーム終了 (${reason==='all_safes_cleared'?'金庫山尽き':'山札枯渇'})`);
+  const reasonText = reason==='all_safes_cleared' ? '金庫山尽き' : reason==='sudden_death_cleared' ? 'サドンデス決着' : '山札枯渇';
+  log_(st, `🏁 ゲーム終了 (${reasonText})`);
 
   const order = arr(room.order).filter(s=>s!=='_');
 
@@ -949,11 +997,9 @@ function processAction(room, seat, action){
       log_(st, `🃏 ${p.name} が${meta.label}金庫に配置 (${sf.cards.length}/${meta.count})`, { private:{ [seat]: `🃏自分の配置=${card.n}` } });
     }
 
-    let judged = false;
-    if(sf.cards.length >= meta.count){
-      judgeSafe(st, safeIdx, room);
-      judged = true;
-    }
+    // 【v7 バグ修正】カードを置くたびに判定 (sum>target / sum===target / 満杯時 NEAR/FAIL)
+    const judged = judgeSafe(st, safeIdx, room);
+    log_(st, `🔍 配置後チェック: ${meta.label}金庫 judged=${judged} cards=${sf.cards.length}/${meta.count}`);
 
     if(st.mode === 'duel'){
       // デュエル: 配置後はノイズ配置フェーズへ（金庫が残っていて山札もある場合）
@@ -1072,15 +1118,11 @@ function processAction(room, seat, action){
     sf.cards.push({ id:noise.id, n:noise.n, owner:seat, isNoise:true });
     log_(st, `👻 ${p.name} が${meta.label}金庫にノイズカードを伏せ (${sf.cards.length}/${meta.count})`);
 
-    // 【v6 BUGFIX】 明示的に st.safes[safeIdx].cards を参照して判定負荷をチェック
-    let judged = false;
+    // 【v7 バグ修正】ノイズ後もカードごとに判定 (sum>target / sum===target / 満杯時 NEAR/FAIL)
     const currentSafe = st.safes[safeIdx];
     const currentCardCount = arr(currentSafe.cards).length;
     log_(st, `🔍 ノイズ後チェック: ${meta.label}金庫 cards.length=${currentCardCount}/${meta.count}`);
-    if(currentCardCount >= meta.count){
-      judgeSafe(st, safeIdx, room);
-      judged = true;
-    }
+    const judged = judgeSafe(st, safeIdx, room);
     if(judged){
       refillSafes(st);
       if(checkGameEnd(st, room)) return;
@@ -1501,6 +1543,8 @@ function renderSafes(r, st){
     div.onclick = ()=>{
       if(S.isSpectator) return;
       if(S.scoutMode) return;
+      // Q-V6-A: コードスワップ選択モード中はカードタップで選択 (safeクリックは無効)
+      if(S.swapMode){ toast('💱 入れ替えるカードをタップしてください'); return; }
       // デュエル: ノイズ配置モード
       if(st.mode === 'duel' && st.phase === 'choose_noise' && st.turnSeat === S.seat){
         if(cards.length >= meta.count){ toast('⚠️ 満杯'); return; }
@@ -1532,6 +1576,33 @@ function renderSafes(r, st){
         }
         const cardEl = document.createElement('div');
         cardEl.className = 'card ' + backCls;
+        // Q-V6-B: スライドアニメーション用 IDタグ付与
+        if(c.id != null) cardEl.dataset.cardId = c.id;
+        cardEl.dataset.safeIdx = idx;
+        cardEl.dataset.cardIdx = i;
+
+        // Q-V6-A: コードスワップ選択モード
+        if(S.swapMode && !S.isSpectator){
+          const isPicked = S.swapPicks.some(p => p.safeIdx === idx && p.cardIdx === i);
+          cardEl.style.cursor = 'pointer';
+          cardEl.style.outline = isPicked ? '3px solid #2f80ed' : '2px dashed #f2c94c';
+          const icon = c.owner === GHOST_OWNER ? '👻' : (seatIdx>=0 ? EMOJI[seatIdx] : '?');
+          cardEl.innerHTML = `<div class="orderNum">${i+1}${isPicked?' ☑️':''}</div><div class="bigIcon">${icon}</div><div class="ownerName">${isPicked?'選択中':'💱tap'}</div>`;
+          cardEl.onclick = (e) => {
+            e.stopPropagation();
+            const existIdx = S.swapPicks.findIndex(p => p.safeIdx === idx && p.cardIdx === i);
+            if(existIdx >= 0){
+              S.swapPicks.splice(existIdx, 1);
+            } else if(S.swapPicks.length < 2){
+              S.swapPicks.push({ safeIdx:idx, cardIdx:i });
+            } else {
+              toast('⚠️ すでに2枚選択中、一旦取り消してから選択し直して');
+            }
+            renderAll();
+          };
+          slotsEl.appendChild(cardEl);
+          continue;
+        }
 
         if(S.peekingCard && S.peekingCard.safeIdx === idx && S.peekingCard.cardIdx === i){
           cardEl.className = 'card peek';
@@ -1569,6 +1640,24 @@ function renderSafes(r, st){
           const noiseTag = c.isNoise ? '🎲' : '';
           cardEl.innerHTML = `<div class="orderNum">${i+1}${noiseTag}</div><div class="bigIcon">${icon}</div><div class="ownerName">${escapeHtml(ownerName)}</div>`;
         }
+        // Q-V6-A: コードスワップ選択モードではカードをタップ可能にする
+        if(S.swapMode && !S.isSpectator){
+          const isPicked = S.swapPicks && S.swapPicks.some(pk => pk.safeIdx === idx && pk.cardIdx === i);
+          cardEl.classList.add(isPicked ? 'swap-picked' : 'swap-pickable');
+          cardEl.onclick = (e) => {
+            e.stopPropagation();
+            if(!S.swapPicks) S.swapPicks = [];
+            if(isPicked){
+              S.swapPicks = S.swapPicks.filter(pk => !(pk.safeIdx === idx && pk.cardIdx === i));
+            } else {
+              if(S.swapPicks.length >= 2){ toast('⚠️ すでに2枚選択済 - 「入れ替え実行」ボタンを押すか選択を解除してください'); return; }
+              S.swapPicks.push({ safeIdx:idx, cardIdx:i });
+            }
+            renderAll();
+          };
+        }
+        // カード識別用IDを付与 (Q-V6-B アニメーションターゲット用)
+        cardEl.id = `swcard_${idx}_${i}`;
         slotsEl.appendChild(cardEl);
       } else {
         const emp = document.createElement('div');
@@ -1775,6 +1864,58 @@ function renderActPanel(r, st){
     };
     btns.appendChild(placeBtn);
   }
+
+  // Q-V6-A: 場コードスワップボタン (同時バースト特典で得た権限使用)
+  const hasSwapRight = p.codeSwapPendingUntil && (st.turnSerial || 0) <= p.codeSwapPendingUntil;
+  if(hasSwapRight){
+    if(!S.swapMode){
+      const sb = document.createElement('button');
+      sb.className = 'primary';
+      sb.textContent = `💱 場コードスワップ (期限:T${p.codeSwapPendingUntil})`;
+      sb.title = 'Q-A: 同時バースト特典、場のカード2枚の位置を交換';
+      sb.onclick = () => { S.swapMode = true; S.swapPicks = []; S.selCard = -1; S.selSafe = -1; renderAll(); };
+      btns.appendChild(sb);
+    } else {
+      info.innerHTML = `💱 <b class="warn">コードスワップ選択モード</b> - 入れ替えるカード2枚をタップ (選択中: ${(S.swapPicks||[]).length}/2)`;
+      const exec = document.createElement('button');
+      exec.className = 'success';
+      exec.textContent = '✅ 入れ替え実行';
+      exec.disabled = !S.swapPicks || S.swapPicks.length !== 2;
+      exec.onclick = async () => {
+        if(!S.swapPicks || S.swapPicks.length !== 2){ toast('⚠️ カードを2枚選択してください'); return; }
+        const [a, b] = S.swapPicks;
+        // Q-V6-B: アニメーショントリガー
+        animateSwap(a, b);
+        await doCodeSwapField(a, b);
+        S.swapMode = false; S.swapPicks = [];
+      };
+      btns.appendChild(exec);
+      const cancel = document.createElement('button');
+      cancel.textContent = '❌ キャンセル';
+      cancel.onclick = () => { S.swapMode = false; S.swapPicks = []; renderAll(); };
+      btns.appendChild(cancel);
+    }
+  }
+}
+
+/* Q-V6-B: コードスワップ移動アニメーション (dataset セレクタで安定取得) */
+function animateSwap(a, b){
+  try {
+    const el1 = document.querySelector(`[data-safe-idx="${a.safeIdx}"][data-card-idx="${a.cardIdx}"]`);
+    const el2 = document.querySelector(`[data-safe-idx="${b.safeIdx}"][data-card-idx="${b.cardIdx}"]`);
+    if(!el1 || !el2) return;
+    const r1 = el1.getBoundingClientRect();
+    const r2 = el2.getBoundingClientRect();
+    const dx = r2.left - r1.left;
+    el1.style.setProperty('--swap-dx', dx + 'px');
+    el2.style.setProperty('--swap-dx', (-dx) + 'px');
+    el1.classList.add('swap-anim');
+    el2.classList.add('swap-anim');
+    setTimeout(()=>{
+      el1.classList.remove('swap-anim');
+      el2.classList.remove('swap-anim');
+    }, 950);
+  } catch(e){ console.warn('animateSwap failed', e); }
 }
 
 function renderLogs(r, st){
@@ -2073,7 +2214,19 @@ function showEvent(ev, room){
     triggerCutin('🌟👻', `奇跡の解錠！ ${ev.byName} にボーナス`, 'success');
     playSound('unlock');
   } else if(ev.type === 'noise_pass'){
-    triggerCutin('💨', `${ev.byName} がノイズ配置をパス (-${NOISE_PASS_COST}chip)`, '');
+    triggerCutin('💨', `${ev.byName} がノイズ配置をパス (-${ev.cost||NOISE_PASS_COST}chip)`, '');
+  } else if(ev.type === 'sudden_death'){
+    // Q-V6-E: 最終局面突入カットイン
+    triggerCutin('⚡✨', '【最終局面突入】山札枯渇 → サドンデス!', 'culprit');
+    playSound('burst');
+  } else if(ev.type === 'last_roulette'){
+    // Q-V6-C: ラスト・ルーレットカットイン
+    triggerCutin('🎰✨', `金庫${ev.safeIdx+1} 倍率ドン (${ev.multiplier}倍)${ev.isFirst?' 【初回確定】':''}`, 'success');
+    playSound('unlock');
+  } else if(ev.type === 'codeswap_field'){
+    // Q-A: 場コードスワップカットイン (Q-V6-B アニメーションは renderSafes で作動)
+    triggerCutin('💱✨', `場コード・スワップ！ by ${ev.byName}`, 'success');
+    playSound('unlock');
   }
 }
 
@@ -2144,9 +2297,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
 });
 
 // 内部テスト用エクスポート
-window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, NOISE_PASS_COST_REPEAT, MAX_SPECTATORS, LAST_ROULETTE_TRIGGER, LAST_ROULETTE_MULTIPLIER, refillSafes };
+window.__internal = { processAction, initGameState, emptyRoom, judgeSafe, buildThiefDeck, buildSafeDeck, arr, GHOST_OWNER, SAFE_META, BURST_TO_TRIGGER_CLUMSY, MULTI_BURST_BONUS, ALL_GHOST_BONUS, NOISE_PASS_COST, NOISE_PASS_COST_REPEAT, MAX_SPECTATORS, LAST_ROULETTE_TRIGGER, LAST_ROULETTE_MULTIPLIER, LAST_ROULETTE_FIRST_PROB, LAST_ROULETTE_REPEAT_PROB, refillSafes };
 
-console.log('[MC v6] Loaded. Waiting for Firebase...');
+console.log('[MC v7] Loaded. Waiting for Firebase...');
 </script>
 
 </body>
